@@ -1,0 +1,11 @@
+prometheus:
+  # Enable or disable Prometheus monitoring
+  # 是否开启prometheus监控
+  enable: true
+  # autoSetPorts indicates whether to automatically set the ports
+  # 该配置项决定是否自动设置 Prometheus 监听的端口。如果启用自动设置，则系统会根据预设规则选择合适的端口；如果关闭此功能（设置为 false），则需要手动指定端口
+  autoSetPorts: true
+  # List of ports that Prometheus listens on; each port corresponds to an instance of monitoring. Ensure these are managed accordingly
+  # It will only take effect when autoSetPorts is set to false.
+  # 这个域用于列举 Prometheus 监听的端口。需要注意的是，此列表配置只会在 autoSetPorts 被禁用（即设置为 false）时才生效。每个端口对应一个监控实例
+  ports:

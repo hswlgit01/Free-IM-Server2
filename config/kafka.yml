@@ -1,0 +1,62 @@
+# kafka相关配置
+# Username for authentication
+username: ''
+# Password for authentication
+password: ''
+# Producer acknowledgment settings
+# 配置生产者的消息确认机制
+producerAck: 
+# Compression type to use (e.g., none, gzip, snappy)
+# 指定消息传输时使用的压缩方法，比如 "none" 表示不进行压缩；其他可能的值还包括 "gzip"、"snappy" 等。
+compressType: none
+# List of Kafka broker addresses
+# 一个列表，指定 Kafka broker 的地址
+address: [ localhost:19094 ]
+
+# 主题相关
+# Kafka topic for Redis integration
+# 用于将消息发送到不同的系统，每个系统对应一个特定的 Kafka 主题：
+# 用于 Redis 集成的 Kafka 主题
+toRedisTopic: toRedis
+# Kafka topic for MongoDB integration
+# 用于 MongoDB 集成的 Kafka 主题
+toMongoTopic: toMongo
+# Kafka topic for push notifications
+# 用于推送通知的 Kafka 主题
+toPushTopic: toPush
+# Kafka topic for offline push notifications
+# 用于离线推送通知的 Kafka 主题
+toOfflinePushTopic: toOfflinePush
+
+# 消费者相关
+# Consumer group ID for Redis topic
+# Redis 主题对应的消费者组 ID
+toRedisGroupID: redis
+# Consumer group ID for MongoDB topic
+# MongoDB 主题对应的消费者组 ID
+toMongoGroupID: mongo
+# Consumer group ID for push notifications topic
+# 推送通知主题对应的消费者组 ID
+toPushGroupID: push
+# Consumer group ID for offline push notifications topic
+# 离线推送通知主题对应的消费者组 ID
+toOfflinePushGroupID: offlinePush
+
+# TLS (Transport Layer Security) configuration
+# 用于配置 Kafka 与客户端之间的加密连接相关设置：
+tls:
+  # Enable or disable TLS
+  # 开启或关闭tls加密
+  enableTLS: false
+  # CA certificate file path
+  caCrt: 
+  # Client certificate file path
+  clientCrt: 
+  # Client key file path
+  clientKey: 
+  # Client key password
+  clientKeyPwd: 
+  # Whether to skip TLS verification (not recommended for production)
+  # 布尔值，决定是否跳过 TLS 证书验证（通常不推荐在生产环境中使用），
+  # 配置为 false 表示严格验证
+  insecureSkipVerify: false
