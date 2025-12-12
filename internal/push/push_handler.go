@@ -97,7 +97,7 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 
 	if nowSec-sec > 10 {
 		prommetrics.MsgLoneTimePushCounter.Inc()
-		log.ZWarn(ctx, "it’s been a while since the message was sent", nil, "msg", msgFromMQ.String(), "sec", sec, "nowSec", nowSec, "nowSec-sec", nowSec-sec)
+		log.ZWarn(ctx, "it's been a while since the message was sent", nil, "msg", msgFromMQ.String(), "sec", sec, "nowSec", nowSec, "nowSec-sec", nowSec-sec)
 	}
 	var err error
 
@@ -115,7 +115,7 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 		err = c.Push2User(ctx, pushUserIDList, msgFromMQ.MsgData)
 	}
 	if err != nil {
-		log.ZWarn(ctx, "push failed", err, "msg", msgFromMQ.String())
+		log.ZError(ctx, "Push failed", err, "msg", msgFromMQ.String())
 	}
 }
 

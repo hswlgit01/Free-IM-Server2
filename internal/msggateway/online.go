@@ -124,7 +124,6 @@ func (ws *WsServer) ChangeOnlineStatus(concurrent int) {
 			log.ZDebug(context.Background(), "renewal ticker", "deadline", deadline, "nowtime", now, "num", len(users), "users", users)
 			pushUserState(users...)
 		case state := <-ws.clients.UserState():
-			log.ZDebug(context.Background(), "OnlineCache user online change", "userID", state.UserID, "online", state.Online, "offline", state.Offline)
 			pushUserState(state)
 		}
 	}

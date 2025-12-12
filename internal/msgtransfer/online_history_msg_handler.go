@@ -371,9 +371,8 @@ func (och *OnlineHistoryRedisConsumerHandler) Close() {
 
 func (och *OnlineHistoryRedisConsumerHandler) toPushTopic(ctx context.Context, key, conversationID string, msgs []*ContextMsg) {
 	for _, v := range msgs {
-		log.ZDebug(ctx, "push msg to topic", "msg", v.message.String())
 		if err := och.msgTransferDatabase.MsgToPushMQ(v.ctx, key, conversationID, v.message); err != nil {
-			log.ZError(ctx, "msg to push topic error", err, "msg", v.message.String())
+			log.ZError(ctx, "MsgToPushMQ error", err, "msg", v.message.String())
 		}
 	}
 }

@@ -1,9 +1,10 @@
 package msggateway
 
 import (
-	"github.com/openimsdk/tools/utils/datautil"
 	"sync"
 	"time"
+
+	"github.com/openimsdk/tools/utils/datautil"
 )
 
 type UserMap interface {
@@ -81,8 +82,9 @@ func (u *userMap) RecvSubChange(userID string, platformIDs []int32) bool {
 }
 
 func (u *userMap) push(userID string, userPlatform *UserPlatform, offline []int32) bool {
+	state := UserState{UserID: userID, Online: userPlatform.PlatformIDs(), Offline: offline}
 	select {
-	case u.ch <- UserState{UserID: userID, Online: userPlatform.PlatformIDs(), Offline: offline}:
+	case u.ch <- state:
 		userPlatform.Time = time.Now()
 		return true
 	default:

@@ -147,10 +147,9 @@ func (o *OnlineCache) doSubscribe(ctx context.Context, rdb redis.UniversalClient
 	doMessage := func(message *redis.Message) {
 		userID, platformIDs, err := useronline.ParseUserOnlineStatus(message.Payload)
 		if err != nil {
-			log.ZError(ctx, "OnlineCache setHasUserOnline redis subscribe parseUserOnlineStatus", err, "payload", message.Payload, "channel", message.Channel)
+			log.ZError(ctx, "parse user online status error", err, "payload", message.Payload)
 			return
 		}
-		log.ZDebug(ctx, fmt.Sprintf("get subscribe %s message", cachekey.OnlineChannel), "useID", userID, "platformIDs", platformIDs)
 		switch o.fullUserCache {
 		case true:
 			if len(platformIDs) == 0 {
@@ -160,8 +159,7 @@ func (o *OnlineCache) doSubscribe(ctx context.Context, rdb redis.UniversalClient
 				o.mapCache.Store(userID, platformIDs)
 			}
 		case false:
-			storageCache := o.setHasUserOnline(userID, platformIDs)
-			log.ZDebug(ctx, "OnlineCache setHasUserOnline", "userID", userID, "platformIDs", platformIDs, "payload", message.Payload, "storageCache", storageCache)
+			o.setHasUserOnline(userID, platformIDs)
 			if fn != nil {
 				fn(ctx, userID, platformIDs)
 			}

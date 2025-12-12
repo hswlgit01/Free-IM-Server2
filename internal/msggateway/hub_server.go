@@ -140,7 +140,6 @@ func (s *Server) pushToUser(ctx context.Context, userID string, msgData *sdkws.M
 			UserID: userID,
 		}
 	}
-	log.ZDebug(ctx, "push user online", "clients", clients, "userID", userID)
 	result := &msggateway.SingleMsgToUserResults{
 		UserID: userID,
 		Resp:   make([]*msggateway.SingleMsgToUserPlatform, 0, len(clients)),
@@ -156,7 +155,6 @@ func (s *Server) pushToUser(ctx context.Context, userID string, msgData *sdkws.M
 			(client.IsBackground && client.PlatformID != constant.IOSPlatformID) {
 			err := client.PushMessage(ctx, msgData)
 			if err != nil {
-				log.ZWarn(ctx, "online push msg failed", err, "userID", userID, "platformID", client.PlatformID)
 				userPlatform.ResultCode = int64(servererrs.ErrPushMsgErr.Code())
 			} else {
 				if _, ok := s.pushTerminal[client.PlatformID]; ok {

@@ -194,7 +194,8 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 		if err := m.webhookBeforeMsgModify(ctx, &m.config.WebhooksConfig.BeforeMsgModify, req, before); err != nil {
 			return nil, err
 		}
-		if err := m.MsgDatabase.MsgToMQ(ctx, conversationutil.GenConversationUniqueKeyForSingle(req.MsgData.SendID, req.MsgData.RecvID), req.MsgData); err != nil {
+		conversationKey := conversationutil.GenConversationUniqueKeyForSingle(req.MsgData.SendID, req.MsgData.RecvID)
+		if err := m.MsgDatabase.MsgToMQ(ctx, conversationKey, req.MsgData); err != nil {
 			prommetrics.SingleChatMsgProcessFailedCounter.Inc()
 			return nil, err
 		}

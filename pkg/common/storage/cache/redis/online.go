@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openimsdk/open-im-server/v3/pkg/common/config"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/cachekey"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/mcache"
@@ -18,9 +17,10 @@ import (
 )
 
 func NewUserOnline(rdb redis.UniversalClient) cache.OnlineCache {
-	if rdb == nil || config.Standalone() {
+	if rdb == nil {
 		return mcache.NewOnlineCache()
 	}
+	// 即使在 standalone 模式下也使用 Redis 来确保状态同步
 	return &userOnline{
 		rdb:         rdb,
 		expire:      cachekey.OnlineExpire,
@@ -130,14 +130,11 @@ func (s *userOnline) SetUserOnline(ctx context.Context, userID string, online, o
 		return errs.ErrInternalServer.WrapMsg("SetUserOnline redis lua invalid return value")
 	}
 	if platformIDs[len(platformIDs)-1] != "0" {
-		log.ZDebug(ctx, "redis SetUserOnline push", "userID", userID, "online", online, "offline", offline, "platformIDs", platformIDs[:len(platformIDs)-1])
 		platformIDs[len(platformIDs)-1] = userID
 		msg := strings.Join(platformIDs, ":")
 		if err := s.rdb.Publish(ctx, s.channelName, msg).Err(); err != nil {
 			return errs.Wrap(err)
 		}
-	} else {
-		log.ZDebug(ctx, "redis SetUserOnline not push", "userID", userID, "online", online, "offline", offline)
 	}
 	return nil
 }
