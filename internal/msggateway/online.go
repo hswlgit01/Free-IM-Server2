@@ -89,7 +89,7 @@ func (ws *WsServer) ChangeOnlineStatus(concurrent int) {
 		ctx, cancel := context.WithTimeout(opIdCtx, time.Second*5)
 		defer cancel()
 		if err := ws.userClient.SetUserOnlineStatus(ctx, req); err != nil {
-			log.ZError(ctx, "update user online status", err)
+			log.ZError(ctx, "SetUserOnlineStatus error", err)
 		}
 		for _, ss := range req.Status {
 			for _, online := range ss.Online {

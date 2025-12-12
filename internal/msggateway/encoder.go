@@ -31,7 +31,6 @@ import (
 
 	"github.com/openimsdk/open-im-server/v3/pkg/rpcli"
 	"github.com/openimsdk/tools/errs"
-	"github.com/openimsdk/tools/log"
 )
 
 type Encoder interface {
@@ -124,28 +123,8 @@ func (e *AESGobEncoder) Decode(encodeData []byte, decodeData *Req) error {
 
 // 从UserKeys获取AES密钥
 func (e *AESGobEncoder) getUserAESKey(ctx context.Context, userID string) (string, error) {
-	if userID == "" {
-		return getDefaultAESKeyBase64(), nil
-	}
-	// 检查userKeysClient是否已初始化
-	if e.userClient == nil {
-		log.ZWarn(ctx, "userKeysClient未初始化，使用默认密钥", nil, "userID", userID)
-		return getDefaultAESKeyBase64(), nil
-	}
-	// 获取用户密钥
-	aesKey, err := e.userClient.GetUserAESKey(ctx, userID)
-	if err != nil {
-		log.ZWarn(ctx, "获取用户密钥失败，使用默认密钥", err, "userID", userID)
-		return getDefaultAESKeyBase64(), nil
-	}
-
-	// 检查用户是否有自定义的AES密钥
-	if aesKey != "" {
-		return aesKey, nil
-	}
-
-	// 如果用户没有自定义密钥，使用默认密钥
-	log.ZWarn(ctx, "用户密钥均为空，使用默认密钥", nil, "userID", userID)
+	// 临时方案: 始终使用默认密钥
+	// TODO: 等需要支持用户自定义密钥时,恢复从数据库获取用户密钥的逻辑
 	return getDefaultAESKeyBase64(), nil
 }
 
@@ -192,11 +171,15 @@ func (e *AESGobEncoder) encrypt(ctx context.Context, plainText []byte, userID st
 func (e *AESGobEncoder) decrypt(ctx context.Context, ciphertextBase64 string, userID string) ([]byte, error) {
 	// 获取用户的AES密钥
 	keyBase64, err := e.getUserAESKey(ctx, userID)
-	//log.ZDebug(ctx, "解密处理", "userID", userID, "keyLength", len(keyBase64), "success", err == nil)
 	if err != nil {
 		return nil, errs.WrapMsg(err, "get user AES key error")
 	}
 
+	return e.tryDecryptWithKey(ctx, ciphertextBase64, keyBase64)
+}
+
+// tryDecryptWithKey 尝试使用指定密钥解密
+func (e *AESGobEncoder) tryDecryptWithKey(ctx context.Context, ciphertextBase64 string, keyBase64 string) ([]byte, error) {
 	// 解码base64密钥
 	key, err := base64.StdEncoding.DecodeString(keyBase64)
 	if err != nil {

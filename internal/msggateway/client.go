@@ -147,7 +147,7 @@ func (c *Client) readMessage() {
 		log.ZDebug(c.ctx, "readMessage")
 		messageType, message, returnErr := c.conn.ReadMessage()
 		if returnErr != nil {
-			log.ZWarn(c.ctx, "readMessage", returnErr, "messageType", messageType)
+			log.ZError(c.ctx, "ReadMessage error", returnErr)
 			c.closedErr = returnErr
 			return
 		}
@@ -294,7 +294,7 @@ func (c *Client) replyMessage(ctx context.Context, binaryReq *Req, err error, re
 	log.ZDebug(ctx, "gateway reply message", "resp", mReply.String())
 	err = c.writeBinaryMsg(mReply)
 	if err != nil {
-		log.ZWarn(ctx, "wireBinaryMsg replyMessage", err, "resp", mReply.String())
+		log.ZError(ctx, "writeBinaryMsg error", err)
 	}
 	log.ZDebug(ctx, "wireBinaryMsg end", "time cost", time.Since(t))
 

@@ -38,7 +38,11 @@ func (ws *WsServer) SubUserOnlineStatus(ctx context.Context, client *Client, dat
 			})
 		}
 	}
-	return proto.Marshal(&resp)
+	respData, marshalErr := proto.Marshal(&resp)
+	if marshalErr != nil {
+		return nil, marshalErr
+	}
+	return respData, nil
 }
 
 func newSubscription() *Subscription {

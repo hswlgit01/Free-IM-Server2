@@ -176,7 +176,7 @@ func (ws *WsServer) Run(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
-		wsServer := http.Server{Addr: fmt.Sprintf(":%d", ws.port), Handler: nil}
+		wsServer := http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", ws.port), Handler: nil}
 		http.HandleFunc("/", ws.wsHandler)
 		go func() {
 			defer close(done)
@@ -435,7 +435,7 @@ func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	err := connContext.ParseEssentialArgs()
 	if err != nil {
 		// If there's an error during parsing, return an error via HTTP and stop processing
-
+		log.ZError(connContext, "ParseEssentialArgs failed", err)
 		httpError(connContext, err)
 		return
 	}
@@ -444,6 +444,7 @@ func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := ws.authClient.ParseToken(connContext, connContext.GetToken())
 	if err != nil {
 		// If there's an error parsing the Token, decide whether to send the error message via WebSocket based on the context flag
+		log.ZError(connContext, "ParseToken error", err)
 		shouldSendError := connContext.ShouldSendResp()
 		if shouldSendError {
 			// Create a WebSocket connection object and attempt to send the error message via WebSocket
@@ -467,11 +468,12 @@ func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.ZDebug(connContext, "new conn", "token", connContext.GetToken())
+
 	// Create a WebSocket long connection object
 	wsLongConn := newGWebSocket(WebSocket, ws.handshakeTimeout, ws.writeBufferSize)
 	if err := wsLongConn.GenerateLongConn(w, r); err != nil {
 		//If the creation of the long connection fails, the error is handled internally during the handshake process.
-		log.ZWarn(connContext, "long connection fails", err)
+		log.ZWarn(connContext, "GenerateLongConn failed", err)
 		return
 	} else {
 		// Check if a normal response should be sent via WebSocket
@@ -488,6 +490,10 @@ func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// Retrieve a client object from the client pool, reset its state, and associate it with the current WebSocket long connection
 	client := ws.clientPool.Get().(*Client)
 	client.ResetClient(connContext, wsLongConn, ws, ws.userClient)
+
+	log.ZInfo(connContext, "📝 [Server] Client registered, starting message handler",
+		"userID", connContext.GetUserID(),
+		"currentOnlineUsers", ws.onlineUserNum.Load())
 
 	// Register the client with the server and start message processing
 	ws.registerChan <- client
