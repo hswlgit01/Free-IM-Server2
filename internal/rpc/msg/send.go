@@ -175,7 +175,9 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 	}
 	isSend := true
 	isNotification := msgprocessor.IsNotificationByMsg(req.MsgData)
-	if !isNotification {
+	// 如果是自发自收消息(如语音通话的状态通知),跳过接收选项检查
+	// 避免查询不存在的自我会话(si_userID_userID)
+	if !isNotification && req.MsgData.SendID != req.MsgData.RecvID {
 		isSend, err = m.modifyMessageByUserMessageReceiveOpt(
 			ctx,
 			req.MsgData.RecvID,

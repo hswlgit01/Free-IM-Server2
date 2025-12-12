@@ -153,7 +153,11 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 	switch msg.ContentType {
 	case constant.Text, constant.Picture, constant.Voice, constant.Video,
 		constant.File, constant.AtText, constant.Merger, constant.Card,
-		constant.Location, constant.Custom, constant.Quote, constant.AdvancedText, constant.MarkdownText:
+		constant.Location, constant.Quote, constant.AdvancedText, constant.MarkdownText:
+	case constant.Custom:
+		// 自定义信令消息(如语音/视频通话)不应同步给发送者
+		// 避免自我会话查询错误
+		datautil.SetSwitchFromOptions(msg.Options, constant.IsSenderSync, false)
 	case constant.Revoke:
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
