@@ -29,7 +29,7 @@ prometheus:
 object:
   # Use MinIO as object storage, or set to "cos", "oss", "kodo", "aws", while also configuring the corresponding settings
   # 选择使用的对象存储,当前启用的是 MinIO,miniIO的配置在minio.yml内
-  enable: aws
+  enable: minio
   cos:
     bucketURL: 
     secretID: 

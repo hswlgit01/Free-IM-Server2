@@ -38,18 +38,20 @@ import (
 )
 
 type ThirdApi struct {
-	GrafanaUrl string
-	Client     third.ThirdClient
-	Config     *config.Third // 直接使用现有的Third配置
-	httpClient *http.Client  // 复用HTTP客户端
-	once       sync.Once     // 确保客户端只初始化一次
+	GrafanaUrl  string
+	Client      third.ThirdClient
+	Config      *config.Third // 直接使用现有的Third配置
+	MinioConfig *config.Minio // MinIO配置
+	httpClient  *http.Client  // 复用HTTP客户端
+	once        sync.Once     // 确保客户端只初始化一次
 }
 
-func NewThirdApi(client third.ThirdClient, grafanaUrl string, config *config.Third) ThirdApi {
+func NewThirdApi(client third.ThirdClient, grafanaUrl string, thirdConfig *config.Third, minioConfig *config.Minio) ThirdApi {
 	return ThirdApi{
-		Client:     client,
-		GrafanaUrl: grafanaUrl,
-		Config:     config,
+		Client:      client,
+		GrafanaUrl:  grafanaUrl,
+		Config:      thirdConfig,
+		MinioConfig: minioConfig,
 	}
 }
 
@@ -339,55 +341,89 @@ func (o *ThirdApi) S3Proxy(c *gin.Context) {
 
 // buildS3URL 根据路径和查询参数构建真实的S3 URL
 func (o *ThirdApi) buildS3URL(filePath, query string) (string, error) {
-	if o.Config == nil || o.Config.Object.Enable != "aws" {
-		return "", fmt.Errorf("AWS S3 not configured")
+	if o.Config == nil {
+		return "", fmt.Errorf("storage not configured")
 	}
 
-	// 从配置中获取AWS配置信息
-	region := o.Config.Object.Aws.Region
-	if region == "" {
-		region = "ap-east-1" // 默认区域
-	}
-
-	// 从 /openim/ 开始提取路径
-	openimIndex := strings.Index(filePath, "/openim/")
-	if openimIndex != -1 {
-		filePath = filePath[openimIndex:] // 从 /openim/ 开始截取
-	} else {
-		// 如果没找到 /openim/，确保filePath以/开头
-		if !strings.HasPrefix(filePath, "/") {
-			filePath = "/" + filePath
+	// 检查配置的存储类型
+	switch o.Config.Object.Enable {
+	case "aws":
+		// 从配置中获取AWS配置信息
+		region := o.Config.Object.Aws.Region
+		if region == "" {
+			region = "ap-east-1" // 默认区域
 		}
-	}
 
-	// 获取桶名
-	bucket := o.Config.Object.Aws.Bucket
-	if bucket == "" {
-		return "", fmt.Errorf("AWS S3 bucket not configured")
-	}
+		// 从 /openim/ 开始提取路径
+		openimIndex := strings.Index(filePath, "/openim/")
+		if openimIndex != -1 {
+			filePath = filePath[openimIndex:] // 从 /openim/ 开始截取
+		} else {
+			// 如果没找到 /openim/，确保filePath以/开头
+			if !strings.HasPrefix(filePath, "/") {
+				filePath = "/" + filePath
+			}
+		}
 
-	// 根据配置选择S3 URL格式
-	var s3URL string
-	urlStyle := o.Config.Object.Aws.URLStyle
-	if urlStyle == "" {
-		urlStyle = "virtual-hosted" // 默认使用 Virtual-hosted-style
-	}
+		// 获取桶名
+		bucket := o.Config.Object.Aws.Bucket
+		if bucket == "" {
+			return "", fmt.Errorf("AWS S3 bucket not configured")
+		}
 
-	switch urlStyle {
-	case "path-style":
-		// Path-style 格式: https://s3.region.amazonaws.com/bucket/path
-		s3URL = fmt.Sprintf("https://s3.%s.amazonaws.com/%s%s", region, bucket, filePath)
-	case "virtual-hosted":
-		fallthrough
+		// 根据配置选择S3 URL格式
+		var s3URL string
+		urlStyle := o.Config.Object.Aws.URLStyle
+		if urlStyle == "" {
+			urlStyle = "virtual-hosted" // 默认使用 Virtual-hosted-style
+		}
+
+		switch urlStyle {
+		case "path-style":
+			// Path-style 格式: https://s3.region.amazonaws.com/bucket/path
+			s3URL = fmt.Sprintf("https://s3.%s.amazonaws.com/%s%s", region, bucket, filePath)
+		case "virtual-hosted":
+			fallthrough
+		default:
+			// Virtual-hosted-style 格式: https://bucket.s3.region.amazonaws.com/path (AWS推荐)
+			s3URL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com%s", bucket, region, filePath)
+		}
+		if query != "" {
+			s3URL += "?" + query
+		}
+		return s3URL, nil
+
+	case "minio":
+		// MinIO配置 - 直接使用MinIO的外部地址
+		if o.MinioConfig == nil {
+			return "", fmt.Errorf("MinIO not configured")
+		}
+
+		// 构建MinIO URL
+		externalAddr := o.MinioConfig.ExternalAddress
+		if externalAddr == "" {
+			externalAddr = o.MinioConfig.InternalAddress
+		}
+
+		// 确保地址包含协议
+		if !strings.HasPrefix(externalAddr, "http://") && !strings.HasPrefix(externalAddr, "https://") {
+			externalAddr = "http://" + externalAddr
+		}
+
+		// filePath 格式为 /bucket/path 或 /openim/bucket/path
+		// 需要保持原始路径,MinIO会自动处理
+		// 移除前导斜杠
+		filePath = strings.TrimPrefix(filePath, "/")
+
+		minioURL := fmt.Sprintf("%s/%s", externalAddr, filePath)
+		if query != "" {
+			minioURL += "?" + query
+		}
+		return minioURL, nil
+
 	default:
-		// Virtual-hosted-style 格式: https://bucket.s3.region.amazonaws.com/path (AWS推荐)
-		s3URL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com%s", bucket, region, filePath)
+		return "", fmt.Errorf("unsupported storage type: %s", o.Config.Object.Enable)
 	}
-	if query != "" {
-		s3URL += "?" + query
-	}
-
-	return s3URL, nil
 }
 
 // #################### logs ####################.
