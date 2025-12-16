@@ -30,14 +30,14 @@ prometheus:
 maxConcurrentWorkers: 3
 #Use geTui for offline push notifications, or choose fcm or jpns; corresponding configuration settings must be specified.
 # 可以设置选择启用哪个推送配置
-enable:
+enable: getui
 getui:
-  pushUrl: https://restapi.getui.com/v2/$appId
-  masterSecret:
-  appKey:
-  intent:
-  channelID:
-  channelName:
+  pushUrl: https://restapi.getui.com/v2/u7XipjV3Dt6qDLMhwRE8U2
+  masterSecret: EasNjZNZO269akZFPbgyb9
+  appKey: K3QdSzBF3D7k8a1o3JSNL2
+  intent: intent:#Intent;launchFlags=0x14000000;package=com.freechat.app;component=com.freechat.app/.MainActivity;end
+  channelID: default_channel
+  channelName: 默认通知
 fcm:
   # Prioritize using file paths. If the file path is empty, use URL
   filePath:   # File path is concatenated with the parameters passed in through - c(`mage` default pass in `config/`) and filePath.
