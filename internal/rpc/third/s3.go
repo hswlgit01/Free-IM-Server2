@@ -386,11 +386,26 @@ type FormDataMate struct {
 }
 
 // rewriteS3URLToProxy 将S3的URL重写为代理服务的URL
+// 对于 MinIO，直接返回原始 URL（MinIO 已通过 externalAddress 配置了公网访问）
+// 对于 AWS S3 等云存储，重写为代理 URL
 func (t *thirdServer) rewriteS3URLToProxy(s3URL, urlPrefix string) string {
-	log.ZDebug(context.Background(), "URL rewrite start", "originalURL", s3URL, "urlPrefix", urlPrefix)
+	log.ZDebug(context.Background(), "URL rewrite start", "originalURL", s3URL, "urlPrefix", urlPrefix, "storageType", t.config.RpcConfig.Object.Enable)
 
-	if s3URL == "" || urlPrefix == "" {
-		log.ZWarn(context.Background(), "URL rewrite skipped - empty parameters", nil, "s3URL", s3URL, "urlPrefix", urlPrefix)
+	if s3URL == "" {
+		log.ZWarn(context.Background(), "URL rewrite skipped - empty s3URL", nil)
+		return s3URL
+	}
+
+	// MinIO 直接返回原始 URL，不需要代理
+	// MinIO 已通过 externalAddress (如 https://files.vitechstore.xyz) 配置了公网 HTTPS 访问
+	if t.config.RpcConfig.Object.Enable == "minio" {
+		log.ZDebug(context.Background(), "MinIO storage - using original presigned URL", "url", s3URL)
+		return s3URL
+	}
+
+	// 其他云存储（AWS S3、OSS、COS 等）需要通过代理访问
+	if urlPrefix == "" {
+		log.ZWarn(context.Background(), "URL rewrite skipped - empty urlPrefix for non-MinIO storage", nil, "s3URL", s3URL)
 		return s3URL
 	}
 
@@ -413,5 +428,6 @@ func (t *thirdServer) rewriteS3URLToProxy(s3URL, urlPrefix string) string {
 		proxyURL += "?" + u.RawQuery
 	}
 
+	log.ZDebug(context.Background(), "URL rewritten for cloud storage", "originalURL", s3URL, "proxyURL", proxyURL)
 	return proxyURL
 }

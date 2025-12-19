@@ -97,13 +97,21 @@ func setURLPrefix(c *gin.Context, urlPrefix *string) error {
 			return nil
 		}
 	}
+
+	// 自动检测协议：优先使用 X-Forwarded-Proto 头（Nginx 代理场景），其次检查 TLS
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	// X-Forwarded-Proto 优先级更高，因为在反向代理场景下 TLS 可能为 nil
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+
 	u := url.URL{
-		Scheme: "http",
+		Scheme: scheme,
 		Host:   c.Request.Host,
 		Path:   "/object/",
-	}
-	if c.Request.TLS != nil {
-		u.Scheme = "https"
 	}
 	*urlPrefix = u.String()
 	return nil
