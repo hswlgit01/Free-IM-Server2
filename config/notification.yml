@@ -195,7 +195,7 @@ groupInfoSetName:
 
 #############################friend#################################
 friendApplicationAdded:
-  isSendMsg: false
+  isSendMsg: true
   reliabilityLevel: 1
   unreadCount: false
   offlinePush:

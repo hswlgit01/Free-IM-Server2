@@ -46,10 +46,20 @@ func FriendDB2Pb(ctx context.Context, friendDB *model.Friend, getUsers func(ctx 
 		return nil, fmt.Errorf("user not found: %s", friendDB.FriendUserID)
 	}
 
-	return &sdkws.FriendInfo{
-		FriendUser: user,
-		CreateTime: friendDB.CreateTime.Unix(),
-	}, nil
+	friendPb := &sdkws.FriendInfo{FriendUser: &sdkws.UserInfo{}}
+	err = datautil.CopyStructFields(friendPb, friendDB)
+	if err != nil {
+		return nil, err
+	}
+
+	friendPb.FriendUser.UserID = user.UserID
+	friendPb.FriendUser.Nickname = user.Nickname
+	friendPb.FriendUser.FaceURL = user.FaceURL
+	friendPb.FriendUser.Ex = user.Ex
+	friendPb.CreateTime = friendDB.CreateTime.Unix()
+	friendPb.IsPinned = friendDB.IsPinned
+
+	return friendPb, nil
 }
 
 func FriendsDB2Pb(ctx context.Context, friendsDB []*model.Friend, getUsers func(ctx context.Context, userIDs []string) (map[string]*sdkws.UserInfo, error)) (friendsPb []*sdkws.FriendInfo, err error) {

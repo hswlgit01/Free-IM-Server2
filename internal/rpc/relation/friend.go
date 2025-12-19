@@ -40,6 +40,7 @@ import (
 	"github.com/openimsdk/open-im-server/v3/protocol/sdkws"
 	"github.com/openimsdk/tools/discovery"
 	"github.com/openimsdk/tools/errs"
+	"github.com/openimsdk/tools/mcontext"
 	"github.com/openimsdk/tools/utils/datautil"
 	"google.golang.org/grpc"
 )
@@ -104,23 +105,27 @@ func Start(ctx context.Context, config *Config, client discovery.Conn, server gr
 		return err
 	}
 	userClient := rpcli.NewUserClient(userConn)
+	localcache.InitLocalCache(&config.LocalCacheConfig)
 
-	// Initialize notification sender
+	// Create friend database first (needed by notification sender)
+	friendDatabase := controller.NewFriendDatabase(
+		friendMongoDB,
+		friendRequestMongoDB,
+		redis.NewFriendCacheRedis(rdb, &config.LocalCacheConfig, friendMongoDB),
+		mgocli.GetTx(),
+	)
+
+	// Initialize notification sender with friend database
 	notificationSender := NewFriendNotificationSender(
 		&config.NotificationConfig,
 		rpcli.NewMsgClient(msgConn),
 		WithRpcFunc(userClient.GetUsersInfo),
+		WithFriendDB(friendDatabase),
 	)
-	localcache.InitLocalCache(&config.LocalCacheConfig)
 
 	// Register Friend server with refactored MongoDB and Redis integrations
 	relation.RegisterFriendServer(server, &friendServer{
-		db: controller.NewFriendDatabase(
-			friendMongoDB,
-			friendRequestMongoDB,
-			redis.NewFriendCacheRedis(rdb, &config.LocalCacheConfig, friendMongoDB),
-			mgocli.GetTx(),
-		),
+		db: friendDatabase,
 		blackDatabase: controller.NewBlackDatabase(
 			blackMongoDB,
 			redis.NewBlackCacheRedis(rdb, &config.LocalCacheConfig, blackMongoDB),
@@ -269,7 +274,23 @@ func (s *friendServer) RespondFriendApply(ctx context.Context, req *relation.Res
 			return nil, err
 		}
 		s.webhookAfterAddFriendAgree(ctx, &s.config.WebhooksConfig.AfterAddFriendAgree, req)
+
+		// 发送好友申请通过通知 (1201)
 		s.notificationSender.FriendApplicationAgreedNotification(ctx, req)
+
+		// 发送好友添加通知 (1204) 给双方
+		// 这确保双方都能收到好友关系建立的通知
+		operationID := mcontext.GetOperationID(ctx)
+		opUserID := req.ToUserID // B是操作者
+
+		// 通知A: B添加了你作为好友
+		// fromUserID=B, toUserID=A → 消息发送给A，Friend记录是A的好友列表中的B
+		_ = s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.ToUserID, req.FromUserID)
+
+		// 通知B: 你添加了A作为好友
+		// fromUserID=A, toUserID=B → 消息发送给B，Friend记录是B的好友列表中的A
+		_ = s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.FromUserID, req.ToUserID)
+
 		return resp, nil
 	}
 	if req.HandleResult == constant.FriendResponseRefuse {
