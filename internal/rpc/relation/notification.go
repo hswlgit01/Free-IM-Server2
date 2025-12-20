@@ -175,7 +175,9 @@ func (f *FriendNotificationSender) FriendAddedNotification(
 	tips.OpUser.Ex = user[0].GetEx()
 	tips.OpUser.Nickname = user[0].GetNickname()
 	tips.OpUser.FaceURL = user[0].GetFaceURL()
-	friends, err := f.db.FindFriendsWithError(ctx, fromUserID, []string{toUserID})
+	// 修复：查询toUserID（接收者）的好友表中的fromUserID记录
+	// 这样发送给toUserID的Friend信息就是toUserID自己的好友列表中的记录
+	friends, err := f.db.FindFriendsWithError(ctx, toUserID, []string{fromUserID})
 	if err != nil {
 		return err
 	}

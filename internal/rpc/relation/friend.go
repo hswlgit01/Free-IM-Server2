@@ -283,12 +283,12 @@ func (s *friendServer) RespondFriendApply(ctx context.Context, req *relation.Res
 		operationID := mcontext.GetOperationID(ctx)
 		opUserID := req.ToUserID // B是操作者
 
-		// 通知A: B添加了你作为好友
-		// fromUserID=B, toUserID=A → 消息发送给A，Friend记录是A的好友列表中的B
+		// 通知A: 你的好友列表中添加了B
+		// fromUserID=B, toUserID=A → 查询A的好友表中的B，发送给A
 		_ = s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.ToUserID, req.FromUserID)
 
-		// 通知B: 你添加了A作为好友
-		// fromUserID=A, toUserID=B → 消息发送给B，Friend记录是B的好友列表中的A
+		// 通知B: 你的好友列表中添加了A
+		// fromUserID=A, toUserID=B → 查询B的好友表中的A，发送给B
 		_ = s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.FromUserID, req.ToUserID)
 
 		return resp, nil

@@ -267,6 +267,10 @@ func (s *NotificationSender) SetOptionsByContentType(_ context.Context, options 
 	switch contentType {
 	case constant.UserStatusChangeNotification:
 		options[constant.IsSenderSync] = false
+	case constant.FriendApplicationNotification:
+		// 禁用好友申请通知的senderSync，避免申请发送者收到自己的申请消息
+		// 这可能导致SDK客户端出现异常行为
+		options[constant.IsSenderSync] = false
 	default:
 	}
 }
