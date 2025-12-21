@@ -12,11 +12,11 @@ secretAccessKey: openIM123
 # 用于 MinIO 认证的会话令牌（可选）。
 sessionToken:
 # Internal address of the MinIO server
-# MinIO 服务器的内部地址，通常用于服务内部通信。
-internalAddress: 192.168.31.166:10005
+# MinIO 服务器的内部地址，通常用于服务内部通信。（本地调试使用localhost）
+internalAddress: 127.0.0.1:10005
 # External address of the MinIO server, accessible from outside. Supports both HTTP and HTTPS using a domain name
-# MinIO 服务器的外部地址，通常用于外部访问。支持 HTTP 和 HTTPS，可以使用域名。
-externalAddress: http://192.168.31.166:10005
+# MinIO 服务器的外部地址，通常用于外部访问。支持 HTTP 和 HTTPS，可以使用域名。（本地调试使用localhost）
+externalAddress: http://127.0.0.1:10005
 # Flag to enable or disable public read access to the bucket
 # 是否启用存储桶的公共读取权限
 publicRead: false
