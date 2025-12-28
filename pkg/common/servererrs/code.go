@@ -58,13 +58,14 @@ const (
 	RegisteredAlreadyError = 1102 // user is already registered
 
 	// Group error codes.
-	GroupIDNotFoundError   = 1201 // GroupID does not exist
-	GroupIDExisted         = 1202 // GroupID already exists
-	NotInGroupYetError     = 1203 // Not in the group yet
-	DismissedAlreadyError  = 1204 // Group has already been dismissed
-	GroupTypeNotSupport    = 1205
-	GroupRequestHandled    = 1206
-	GroupJoinDisabledError = 1207 // Group joining is disabled
+	GroupIDNotFoundError     = 1201 // GroupID does not exist
+	GroupIDExisted           = 1202 // GroupID already exists
+	NotInGroupYetError       = 1203 // Not in the group yet
+	DismissedAlreadyError    = 1204 // Group has already been dismissed
+	GroupTypeNotSupport      = 1205
+	GroupRequestHandled      = 1206
+	GroupJoinDisabledError   = 1207 // Group joining is disabled
+	OfficialAccountProtected = 1208 // Official account is protected from kick/mute operations
 
 	// Relationship error codes.
 	CanNotAddYourselfError   = 1301 // Cannot add yourself as a friend

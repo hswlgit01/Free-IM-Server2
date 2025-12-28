@@ -359,6 +359,7 @@ type Share struct {
 	Secret        string     `yaml:"secret"`
 	IMAdminUserID []string   `yaml:"imAdminUserID"`
 	MultiLogin    MultiLogin `yaml:"multiLogin"`
+	ChatAPIURL    string     `yaml:"chatAPIURL"` // Free-IM-Chat API地址，用于查询用户权限
 }
 
 type MultiLogin struct {

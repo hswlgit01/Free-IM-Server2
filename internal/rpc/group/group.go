@@ -16,9 +16,11 @@ package group
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +73,7 @@ type groupServer struct {
 	msgClient          *rpcli.MsgClient
 	conversationClient *rpcli.ConversationClient
 	mongoCli           *mongoutil.Client
+	httpClient         *http.Client // HTTP客户端，用于调用Free-IM-Chat API
 }
 
 type Config struct {
@@ -130,6 +133,7 @@ func Start(ctx context.Context, config *Config, client discovery.Conn, server gr
 		conversationClient: rpcli.NewConversationClient(conversationConn),
 		mongoCli:           mgocli,
 		groupOpLogDB:       controller.NewGroupOperationLogController(groupOpLogDB),
+		httpClient:         &http.Client{Timeout: 3 * time.Second},
 	}
 
 	gs.db = controller.NewGroupDatabase(rdb, &config.LocalCacheConfig, groupDB, groupMemberDB, groupRequestDB, mgocli.GetTx(), grouphash.NewGroupHashFromGroupServer(&gs))
@@ -636,6 +640,15 @@ func (g *groupServer) KickGroupMember(ctx context.Context, req *pbgroup.KickGrou
 	}
 	if datautil.Contain(owner.UserID, req.KickedUserIDs...) {
 		return nil, errs.ErrArgs.WrapMsg("ownerUID can not Kick")
+	}
+
+	// 检查被踢用户是否拥有官方账号保护权限
+	for _, kickedUserID := range req.KickedUserIDs {
+		hasProtection, _ := g.checkUserHasOfficialProtection(ctx, kickedUserID)
+		if hasProtection {
+			log.ZError(ctx, "官方保护账号不能被移出群组", nil, "userID", kickedUserID, "groupID", req.GroupID)
+			return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("官方客服账号不能被移出群组")
+		}
 	}
 
 	members, err := g.db.FindGroupMembers(ctx, req.GroupID, append(req.KickedUserIDs, opUserID))
@@ -1561,6 +1574,13 @@ func (g *groupServer) DismissGroup(ctx context.Context, req *pbgroup.DismissGrou
 }
 
 func (g *groupServer) MuteGroupMember(ctx context.Context, req *pbgroup.MuteGroupMemberReq) (*pbgroup.MuteGroupMemberResp, error) {
+	// 检查被禁言用户是否拥有官方账号保护权限
+	hasProtection, _ := g.checkUserHasOfficialProtection(ctx, req.UserID)
+	if hasProtection {
+		log.ZError(ctx, "官方保护账号不能被禁言", nil, "userID", req.UserID, "groupID", req.GroupID)
+		return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("官方客服账号不能被禁言")
+	}
+
 	member, err := g.db.TakeGroupMember(ctx, req.GroupID, req.UserID)
 	if err != nil {
 		return nil, err
@@ -2080,4 +2100,47 @@ func (g *groupServer) CreateGroupOperationLog(ctx context.Context, req *pbgroup.
 	}
 
 	return &pbgroup.CreateGroupOperationLogResp{}, nil
+}
+
+// checkUserHasOfficialProtection 检查用户是否拥有官方账号保护权限
+func (g *groupServer) checkUserHasOfficialProtection(ctx context.Context, userID string) (bool, error) {
+	chatAPIURL := g.config.Share.ChatAPIURL
+	if chatAPIURL == "" {
+		chatAPIURL = "http://127.0.0.1:10008"
+	}
+
+	url := fmt.Sprintf("%s/third_admin/organization/internal/check_user_protection?user_id=%s", chatAPIURL, userID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, nil
+	}
+
+	req.Header.Set("operationID", fmt.Sprintf("check_protection_%s_%d", userID, time.Now().Unix()))
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return false, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+
+	var result struct {
+		ErrCode int `json:"errCode"`
+		Data    struct {
+			HasProtection bool `json:"has_protection"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, nil
+	}
+
+	if result.ErrCode != 0 {
+		return false, nil
+	}
+
+	return result.Data.HasProtection, nil
 }
