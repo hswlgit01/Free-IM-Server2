@@ -16,6 +16,7 @@ package msg
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"strconv"
 	"time"
@@ -145,6 +146,50 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 	}
 }
 
+// needsUnreadCountExclusion checks if a custom message should be excluded from unread count
+// based on its customType field
+func needsUnreadCountExclusion(content []byte) bool {
+	// Parse the custom message content to extract customType
+	var customData map[string]interface{}
+	if err := json.Unmarshal(content, &customData); err != nil {
+		return false
+	}
+
+	customType, ok := customData["customType"]
+	if !ok {
+		return false
+	}
+
+	// Convert customType to int (might be float64 from JSON)
+	var typeInt int
+	switch v := customType.(type) {
+	case float64:
+		typeInt = int(v)
+	case int:
+		typeInt = v
+	default:
+		return false
+	}
+
+	// Custom message types that should NOT count as unread:
+	// - 200-204: Call signaling (invite, accept, reject, cancel, hangup)
+	// - 2005: Sync call status
+	// - 910-913: System notifications (blocked, deleted, removed from group, group disbanded)
+	// - 500: Refund notification (product decision: exclude)
+	switch typeInt {
+	case 200, 201, 202, 203, 204: // Call signaling
+		return true
+	case 2005: // Sync call status
+		return true
+	case 910, 911, 912, 913: // System notifications
+		return true
+	case 500: // Refund notification
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 	msg.ServerMsgID = GetMsgID(msg.SendID)
 	if msg.SendTime == 0 {
@@ -158,6 +203,12 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 		// 自定义信令消息(如语音/视频通话)不应同步给发送者
 		// 避免自我会话查询错误
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsSenderSync, false)
+		// 检查是否需要排除未读计数
+		// 包括通话信令(200-204,2005)、系统通知(910-913)、退款通知(500)等
+		if len(msg.Content) > 0 && needsUnreadCountExclusion(msg.Content) {
+			datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
+			datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
+		}
 	case constant.Revoke:
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
