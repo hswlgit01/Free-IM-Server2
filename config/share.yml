@@ -3,6 +3,11 @@ secret: test
 # OpenIM服务的内部管理员用户ID,要与OpenIM服务保持一致,否则无法调通openIM接口
 imAdminUserID: [ imAdmin ]
 
+# Free-IM-Chat API地址（用于查询用户权限，如官方账号保护权限）
+# 本地开发环境使用 http://127.0.0.1:10008
+# 生产环境请修改为实际部署的地址，例如：http://chat-api:10008
+chatAPIURL: "http://127.0.0.1:10008"
+
 # 1: For Android, iOS, Windows, Mac, and web platforms, only one instance can be online at a time
 # 示多端登录相关配置
 multiLogin:
