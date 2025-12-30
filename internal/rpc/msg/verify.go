@@ -23,6 +23,7 @@ import (
 
 	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/servererrs"
+	"github.com/openimsdk/tools/log"
 	"github.com/openimsdk/tools/utils/datautil"
 	"github.com/openimsdk/tools/utils/encrypt"
 	"github.com/openimsdk/tools/utils/timeutil"
@@ -152,45 +153,86 @@ func needsUnreadCountExclusion(content []byte) bool {
 	// Parse the custom message content to extract customType
 	var customData map[string]interface{}
 	if err := json.Unmarshal(content, &customData); err != nil {
+		// Log parsing error with content preview
+		contentPreview := string(content)
+		if len(contentPreview) > 200 {
+			contentPreview = contentPreview[:200] + "..."
+		}
+		// Note: removed debug log, parse error is expected for non-JSON content
 		return false
+	}
+
+	// Check if content is nested (e.g., {"data": "{\"customType\": 200}"} or {"detail": "..."})
+	// Common nested field names: "data", "detail", "content"
+	originalKeys := make([]string, 0, len(customData))
+	for k := range customData {
+		originalKeys = append(originalKeys, k)
+	}
+
+	for _, fieldName := range []string{"data", "detail", "content"} {
+		if field, ok := customData[fieldName]; ok {
+			if fieldStr, isString := field.(string); isString {
+				// Try to parse the nested JSON string
+				var innerData map[string]interface{}
+				if err := json.Unmarshal([]byte(fieldStr), &innerData); err == nil {
+					// Successfully parsed nested content, use it
+					customData = innerData
+					break
+				}
+			}
+		}
 	}
 
 	customType, ok := customData["customType"]
 	if !ok {
+		// CustomType not found - this is normal for non-call messages
 		return false
 	}
 
-	// Convert customType to int (might be float64 from JSON)
+	// Convert customType to int (might be float64 from JSON or string)
 	var typeInt int
 	switch v := customType.(type) {
 	case float64:
 		typeInt = int(v)
 	case int:
 		typeInt = v
+	case string:
+		// Handle string customType (e.g., "200")
+		parsed, err := strconv.Atoi(v)
+		if err != nil {
+			return false
+		}
+		typeInt = parsed
 	default:
 		return false
 	}
 
 	// Custom message types that should NOT count as unread:
-	// - 200-204: Call signaling (invite, accept, reject, cancel, hangup)
-	// - 2005: Sync call status
+	// - 200-204: Call signaling (invite, accept, reject, cancel, hangup) - real-time control, no notification needed
+	// - 2005: Sync call status - internal sync message
 	// - 910-913: System notifications (blocked, deleted, removed from group, group disbanded)
 	// - 500: Refund notification (product decision: exclude)
+	//
+	// Note: 901 (call record) is NOT in this list - it SHOULD count as unread
+	// because users need to know about missed calls
 	switch typeInt {
-	case 200, 201, 202, 203, 204: // Call signaling
+	case 200, 201, 202, 203, 204: // Call signaling - exclude from unread
 		return true
-	case 2005: // Sync call status
+	case 2005: // Sync call status - exclude from unread
 		return true
-	case 910, 911, 912, 913: // System notifications
+	case 910, 911, 912, 913: // System notifications - exclude from unread
 		return true
-	case 500: // Refund notification
+	case 500: // Refund notification - exclude from unread
 		return true
 	default:
-		return false
+		return false // Including 901 - will count as unread
 	}
 }
 
 func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
+	// 强制输出日志,确认函数被调用
+	log.ZWarn(context.Background(), "🔍 [CRITICAL] encapsulateMsgData called", nil, "contentType", msg.ContentType, "sendID", msg.SendID)
+
 	msg.ServerMsgID = GetMsgID(msg.SendID)
 	if msg.SendTime == 0 {
 		msg.SendTime = timeutil.GetCurrentTimestampByMill()
@@ -200,14 +242,32 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 		constant.File, constant.AtText, constant.Merger, constant.Card,
 		constant.Location, constant.Quote, constant.AdvancedText, constant.MarkdownText:
 	case constant.Custom:
+		contentPreview := string(msg.Content)
+		if len(contentPreview) > 200 {
+			contentPreview = contentPreview[:200]
+		}
+		log.ZWarn(context.Background(), "🎯 [CRITICAL] Processing Custom message", nil, "contentType", msg.ContentType, "content", contentPreview)
+		// 确保Options已初始化
+		if msg.Options == nil {
+			msg.Options = make(map[string]bool, 10)
+			log.ZWarn(context.Background(), "✅ [CRITICAL] Initialized Options map", nil)
+		}
 		// 自定义信令消息(如语音/视频通话)不应同步给发送者
 		// 避免自我会话查询错误
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsSenderSync, false)
+		log.ZWarn(context.Background(), "📝 [CRITICAL] Set IsSenderSync=false", nil, "options", msg.Options)
 		// 检查是否需要排除未读计数
 		// 包括通话信令(200-204,2005)、系统通知(910-913)、退款通知(500)等
-		if len(msg.Content) > 0 && needsUnreadCountExclusion(msg.Content) {
-			datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
-			datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
+		if len(msg.Content) > 0 {
+			shouldExclude := needsUnreadCountExclusion(msg.Content)
+			log.ZWarn(context.Background(), "🔎 [CRITICAL] Checked unread exclusion", nil, "shouldExclude", shouldExclude, "options", msg.Options)
+			if shouldExclude {
+				datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
+				datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
+				log.ZWarn(context.Background(), "❌ [CRITICAL] Set unreadCount=false and offlinePush=false", nil, "finalOptions", msg.Options)
+			} else {
+				log.ZWarn(context.Background(), "✅ [CRITICAL] Message will count as unread", nil, "finalOptions", msg.Options)
+			}
 		}
 	case constant.Revoke:
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
