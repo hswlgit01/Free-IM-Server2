@@ -342,7 +342,9 @@ func (t *thirdServer) CompleteFormData(ctx context.Context, req *third.CompleteF
 }
 
 func (t *thirdServer) apiAddress(prefix, name string) string {
-	return prefix + name
+	// 修改为只返回相对路径，不拼接域名前缀
+	// 这样客户端可以根据自己的域名灵活拼接完整URL
+	return name
 }
 
 func (t *thirdServer) DeleteOutdatedData(ctx context.Context, req *third.DeleteOutdatedDataReq) (*third.DeleteOutdatedDataResp, error) {
