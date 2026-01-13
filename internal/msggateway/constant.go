@@ -67,5 +67,5 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 51200
+	maxMessageSize = 1048576 // 1MB (原值: 51200/50KB)
 )

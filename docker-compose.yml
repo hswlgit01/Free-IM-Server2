@@ -3,6 +3,9 @@ networks:
     driver: bridge
 
 services:
+  environment:
+    - TZ=Asia/Shanghai
+
   mongodb:
     image: "${MONGO_IMAGE}"
     ports:
@@ -58,6 +61,9 @@ services:
     networks:
       - openim
 
+  environment:
+    - TZ=Asia/Shanghai
+
   redis:
     image: "${REDIS_IMAGE}"
     container_name: redis
@@ -74,6 +80,9 @@ services:
     command: redis-server /usr/local/redis/config/redis.conf --requirepass openIM123 --appendonly yes
     networks:
       - openim
+
+  environment:
+    - TZ=Asia/Shanghai
 
   etcd:
     image: "${ETCD_IMAGE}"
@@ -96,6 +105,9 @@ services:
     restart: always
     networks:
       - openim
+
+  environment:
+    - TZ=Asia/Shanghai
 
   kafka:
     image: "${KAFKA_IMAGE}"
@@ -120,6 +132,9 @@ services:
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - openim
+
+  environment:
+    - TZ=Asia/Shanghai
 
   minio:
     image: "${MINIO_IMAGE}"
@@ -148,6 +163,9 @@ services:
 #    networks:
 #      - openim
 
+  environment:
+    - TZ=Asia/Shanghai
+
   openim-admin-front:
     image: ${OPENIM_ADMIN_FRONT_IMAGE}
     container_name: openim-admin-front
@@ -156,6 +174,9 @@ services:
       - "11002:80"
     networks:
       - openim
+
+  environment:
+    - TZ=Asia/Shanghai
 
   prometheus:
     image: ${PROMETHEUS_IMAGE}
@@ -174,6 +195,9 @@ services:
       - '--web.listen-address=:${PROMETHEUS_PORT}'
     network_mode: host
 
+  environment:
+    - TZ=Asia/Shanghai
+
   alertmanager:
     image: ${ALERTMANAGER_IMAGE}
     container_name: alertmanager
@@ -187,6 +211,9 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--web.listen-address=:${ALERTMANAGER_PORT}'
     network_mode: host
+
+  environment:
+    - TZ=Asia/Shanghai
 
   grafana:
     image: ${GRAFANA_IMAGE}
@@ -207,6 +234,9 @@ services:
       - ${DATA_DIR:-./}/components/grafana:/var/lib/grafana
     network_mode: host
 
+  environment:
+    - TZ=Asia/Shanghai
+
   node-exporter:
     image: ${NODE_EXPORTER_IMAGE}
     container_name: node-exporter
@@ -223,3 +253,5 @@ services:
       - '--path.rootfs=/rootfs'
       - '--web.listen-address=:19100'
     network_mode: host
+  environment:
+    - TZ=Asia/Shanghai

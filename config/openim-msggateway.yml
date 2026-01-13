@@ -25,8 +25,8 @@ longConnSvr:
   # 单服务ws的最大连接数
   websocketMaxConnNum: 100000
   # Maximum length of the entire WebSocket message packet
-  # ws消息包的最大大小,也就是聊天消息最大是4096
-  websocketMaxMsgLen: 4096
+  # ws消息包的最大大小（字节）
+  websocketMaxMsgLen: 1048576 # 1MB (原值: 4096/4KB)
   # WebSocket connection handshake timeout in seconds
   # ws握手超时时间
   websocketTimeout: 10

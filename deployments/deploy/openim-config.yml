@@ -151,7 +151,7 @@ data:
       # Maximum number of WebSocket connections
       websocketMaxConnNum: 100000
       # Maximum length of the entire WebSocket message packet
-      websocketMaxMsgLen: 4096
+      websocketMaxMsgLen: 1048576 # 1MB (原值: 4096/4KB)
       # WebSocket connection handshake timeout in seconds
       websocketTimeout: 10
 
