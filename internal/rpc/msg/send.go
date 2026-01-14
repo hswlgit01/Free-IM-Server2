@@ -16,6 +16,7 @@ package msg
 
 import (
 	"context"
+	"time"
 
 	"github.com/openimsdk/open-im-server/v3/pkg/common/prommetrics"
 	"github.com/openimsdk/open-im-server/v3/pkg/msgprocessor"
@@ -54,19 +55,50 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 			return nil, err
 		}
 	}
-	switch req.MsgData.SessionType {
-	case constant.SingleChatType:
-		return m.sendMsgSingleChat(ctx, req, before)
-	case constant.NotificationChatType:
-		return m.sendMsgNotification(ctx, req, before)
-	case constant.ReadGroupChatType:
-		return m.sendMsgGroupChat(ctx, req, before)
-	default:
-		return nil, errs.ErrArgs.WrapMsg("unknown sessionType")
+
+	// 返回确认消息所需的基本信息
+	resp := &pbmsg.SendMsgResp{
+		SendTime:    req.MsgData.SendTime,
+		ServerMsgID: req.MsgData.ServerMsgID,
+		ClientMsgID: req.MsgData.ClientMsgID,
 	}
+
+	// 异步处理消息，允许快速确认
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.ZPanic(ctx, "sendMsg panic", errs.ErrPanic(r))
+			}
+		}()
+
+		// 创建新上下文以防原始上下文超时
+		ctxTimeout, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+		defer cancel()
+		// 复制操作ID到新上下文
+		asyncCtx := mcontext.SetOperationID(ctxTimeout, mcontext.GetOperationID(ctx))
+
+		var err error
+		switch req.MsgData.SessionType {
+		case constant.SingleChatType:
+			_, err = m.processSingleChatMsg(asyncCtx, req, before)
+		case constant.NotificationChatType:
+			_, err = m.sendMsgNotification(asyncCtx, req, before)
+		case constant.ReadGroupChatType:
+			_, err = m.processGroupChatMsg(asyncCtx, req, before)
+		default:
+			log.ZError(asyncCtx, "unknown sessionType", nil, "sessionType", req.MsgData.SessionType)
+		}
+
+		if err != nil {
+			log.ZError(asyncCtx, "async message processing failed", err, "clientMsgID", req.MsgData.ClientMsgID)
+		}
+	}()
+
+	// 立即返回确认
+	return resp, nil
 }
 
-func (m *msgServer) sendMsgGroupChat(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
+func (m *msgServer) processGroupChatMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
 	if err = m.messageVerification(ctx, req); err != nil {
 		prommetrics.GroupChatMsgProcessFailedCounter.Inc()
 		return nil, err
@@ -93,6 +125,11 @@ func (m *msgServer) sendMsgGroupChat(ctx context.Context, req *pbmsg.SendMsgReq,
 	resp.ServerMsgID = req.MsgData.ServerMsgID
 	resp.ClientMsgID = req.MsgData.ClientMsgID
 	return resp, nil
+}
+
+// 保留原方法供兼容使用
+func (m *msgServer) sendMsgGroupChat(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
+	return m.processGroupChatMsg(ctx, req, before)
 }
 
 func (m *msgServer) setConversationAtInfo(nctx context.Context, msg *sdkws.MsgData) {
@@ -169,7 +206,7 @@ func (m *msgServer) sendMsgNotification(ctx context.Context, req *pbmsg.SendMsgR
 	return resp, nil
 }
 
-func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
+func (m *msgServer) processSingleChatMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
 	if err := m.messageVerification(ctx, req); err != nil {
 		return nil, err
 	}
@@ -209,4 +246,9 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 			SendTime:    req.MsgData.SendTime,
 		}, nil
 	}
+}
+
+// 保留原方法供兼容使用
+func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
+	return m.processSingleChatMsg(ctx, req, before)
 }

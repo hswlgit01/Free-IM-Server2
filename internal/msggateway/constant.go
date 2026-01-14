@@ -58,14 +58,14 @@ const (
 
 const (
 	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
+	writeWait = 60 * time.Second // 增加到60秒，允许更长的写入时间
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 30 * time.Second
+	pongWait = 120 * time.Second // 增加到120秒，提供更宽松的心跳超时
 
 	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	pingPeriod = 30 * time.Second // 固定为30秒，更频繁地发送心跳
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 1048576 // 1MB (原值: 51200/50KB)
+	maxMessageSize = 16777216 // 16MB (增加到16MB以支持超大消息)
 )

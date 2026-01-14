@@ -362,7 +362,9 @@ func (c *Client) writeBinaryMsg(resp Resp) error {
 		return err
 	}
 
-	if c.IsCompress {
+	// 检查消息大小，大于2MB的消息强制压缩
+	// 即使客户端未请求压缩，也会对大消息进行压缩
+	if c.IsCompress || len(encodedBuf) > 2*1024*1024 {
 		resultBuf, compressErr := c.longConnServer.CompressWithPool(encodedBuf)
 		if compressErr != nil {
 			return compressErr

@@ -41,12 +41,18 @@ import (
 )
 
 const (
-	size              = 500
-	mainDataBuffer    = 500
-	subChanBuffer     = 50
-	worker            = 50
-	interval          = 100 * time.Millisecond
-	hasReadChanBuffer = 1000
+	// 批处理大小，增加到1000提高吞吐量
+	size = 1000
+	// 主缓冲区大小，增加到2000提高消息处理容量
+	mainDataBuffer = 2000
+	// 子通道缓冲区大小，增加到200以减少阻塞
+	subChanBuffer = 200
+	// 工作线程数，增加到100以提高并发处理能力
+	worker = 100
+	// 处理间隔保持不变，更低的值会增加CPU使用率
+	interval = 100 * time.Millisecond
+	// 已读通道缓冲区大小，增加到10000以处理更多的已读消息
+	hasReadChanBuffer = 10000
 )
 
 type ContextMsg struct {

@@ -69,8 +69,12 @@ func (d *GWebSocket) GenerateLongConn(w http.ResponseWriter, r *http.Request) er
 	upgrader := &websocket.Upgrader{
 		HandshakeTimeout: d.handshakeTimeout,
 		CheckOrigin:      func(r *http.Request) bool { return true },
+		// 增加读缓冲区大小到4MB（与maxMessageSize一致）
+		ReadBufferSize:  4 * 1024 * 1024,
+		WriteBufferSize: 4 * 1024 * 1024,
 	}
-	if d.writeBufferSize > 0 { // default is 4kb.
+	// 如果已经设置了写缓冲区大小，则使用设置的值
+	if d.writeBufferSize > 0 {
 		upgrader.WriteBufferSize = d.writeBufferSize
 	}
 
