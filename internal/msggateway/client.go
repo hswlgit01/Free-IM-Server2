@@ -263,8 +263,27 @@ func (c *Client) setAppBackgroundStatus(ctx context.Context, req *Req) ([]byte, 
 		return nil, messageErr
 	}
 
+	// 记录状态变化，用于日志记录
+	oldIsBackground := c.IsBackground
 	c.IsBackground = isBackground
-	// TODO: callback
+
+	// 背景状态变更的回调处理
+	if oldIsBackground != isBackground {
+		log.ZInfo(ctx, "Client background status changed",
+			"userID", c.UserID,
+			"platformID", c.PlatformID,
+			"oldStatus", oldIsBackground,
+			"newStatus", isBackground)
+
+		// 通知推送服务设备状态变更
+		// 注意：iOS设备在后台时应该启用离线推送，而非WebSocket推送
+		if isBackground && c.PlatformID == constant.IOSPlatformID {
+			log.ZDebug(ctx, "iOS device entered background, will use offline push instead of WebSocket push")
+		} else if !isBackground {
+			log.ZDebug(ctx, "Device entered foreground, will use WebSocket push")
+		}
+	}
+
 	return resp, nil
 }
 

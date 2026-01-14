@@ -151,8 +151,34 @@ func (s *Server) pushToUser(ctx context.Context, userID string, msgData *sdkws.M
 		userPlatform := &msggateway.SingleMsgToUserPlatform{
 			RecvPlatFormID: int32(client.PlatformID),
 		}
-		if !client.IsBackground ||
+		// 特殊处理Android平台在后台时的消息
+		if client.IsBackground && client.PlatformID == constant.AndroidPlatformID {
+			// 确保离线推送标志设置为true，以便触发离线通知
+			// 这是解决Android后台不收到通知的关键修改
+			msgDataCopy := *msgData
+			if msgDataCopy.Options == nil {
+				msgDataCopy.Options = make(map[string]bool)
+			}
+
+			// 设置离线推送标志
+			msgDataCopy.Options["offlinePush"] = true
+
+			// 记录日志，方便排查
+			log.ZInfo(ctx, "Android device in background, forcing offlinePush flag",
+				"userID", client.UserID,
+				"platformID", client.PlatformID,
+				"contentType", msgDataCopy.ContentType)
+
+			// 继续通过WebSocket推送（Android平台可以同时使用在线和离线推送）
+			err := client.PushMessage(ctx, &msgDataCopy)
+			if err != nil {
+				userPlatform.ResultCode = int64(servererrs.ErrPushMsgErr.Code())
+			} else {
+				result.OnlinePush = true
+			}
+		} else if !client.IsBackground ||
 			(client.IsBackground && client.PlatformID != constant.IOSPlatformID) {
+			// 原有的处理逻辑保持不变
 			err := client.PushMessage(ctx, msgData)
 			if err != nil {
 				userPlatform.ResultCode = int64(servererrs.ErrPushMsgErr.Code())
@@ -162,6 +188,7 @@ func (s *Server) pushToUser(ctx context.Context, userID string, msgData *sdkws.M
 				}
 			}
 		} else {
+			// 原有iOS后台处理逻辑保持不变
 			userPlatform.ResultCode = int64(servererrs.ErrIOSBackgroundPushErr.Code())
 		}
 		result.Resp = append(result.Resp, userPlatform)
