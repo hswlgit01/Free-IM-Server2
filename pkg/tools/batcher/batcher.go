@@ -101,7 +101,11 @@ func New[T any](opts ...Option) *Batcher[T] {
 		opt(config)
 	}
 	b.config = config
-	b.data = make(chan *T, DefaultDataChanSize)
+	dataChanSize := DefaultDataChanSize
+	if config.dataBuffer > 0 {
+		dataChanSize = config.dataBuffer
+	}
+	b.data = make(chan *T, dataChanSize)
 	b.globalCtx, b.cancel = context.WithCancel(context.Background())
 
 	b.chArrays = make([]chan *Msg[T], b.config.worker)

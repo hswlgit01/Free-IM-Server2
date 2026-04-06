@@ -10,10 +10,12 @@ import (
 )
 
 func (c *conversationServer) GetFullOwnerConversationIDs(ctx context.Context, req *conversation.GetFullOwnerConversationIDsReq) (*conversation.GetFullOwnerConversationIDsResp, error) {
+	// 到 回话_version表中, 查询数据
 	vl, err := c.conversationDatabase.FindMaxConversationUserVersionCache(ctx, req.UserID)
 	if err != nil {
 		return nil, err
 	}
+	//到 回话表中查询数据
 	conversationIDs, err := c.conversationDatabase.GetConversationIDs(ctx, req.UserID)
 	if err != nil {
 		return nil, err

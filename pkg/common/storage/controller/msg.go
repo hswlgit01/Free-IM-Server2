@@ -382,6 +382,12 @@ func (db *commonMsgDatabase) findMsgInfoBySeq(ctx context.Context, userID, docID
 // For new users joining the group, if they don't need to receive old messages,
 // "userMinSeq" can be set as the same value as the conversation's "maxSeq" at the moment they join the group.
 // This ensures that their message retrieval starts from the point they joined.
+//
+// 上面这段英文总结了 userMinSeq / userMaxSeq 的设计目的，下面是更直白的中文说明：
+//   - userMinSeq：用户在某个会话里「能看到的最小 seq」。
+//   - 新进群且不需要同步入群前历史时，可以把 userMinSeq 设置为当时的 maxSeq，这样只拉入群后的消息；
+//   - userMaxSeq：用户在某个会话里「能看到的最大 seq」。
+//   - 被踢出群时，可以把 userMaxSeq 固定到踢出时的 seq，之后即便全局还有新消息，该用户也拉不到。
 func (db *commonMsgDatabase) GetMsgBySeqsRange(ctx context.Context, userID string, conversationID string, begin, end, num, userMaxSeq int64) (int64, int64, []*sdkws.MsgData, error) {
 	userMinSeq, err := db.seqUser.GetUserMinSeq(ctx, conversationID, userID)
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -397,7 +403,15 @@ func (db *commonMsgDatabase) GetMsgBySeqsRange(ctx context.Context, userID strin
 	// "minSeq" represents the startSeq value that the user can retrieve.
 	if minSeq > end {
 		log.ZWarn(ctx, "minSeq > end", errs.New("minSeq>end"), "minSeq", minSeq, "end", end)
-		return 0, 0, nil, nil
+		maxSeq, errSeq := db.seqConversation.GetMaxSeq(ctx, conversationID)
+		if errSeq != nil {
+			return 0, 0, nil, errSeq
+		}
+		if userMaxSeq != 0 && userMaxSeq < maxSeq {
+			maxSeq = userMaxSeq
+		}
+		// 返回正确 min/max 与空列表，便于客户端更新 seq 并下次用正确范围重试，避免群聊一直拉不到消息
+		return minSeq, maxSeq, []*sdkws.MsgData{}, nil
 	}
 	maxSeq, err := db.seqConversation.GetMaxSeq(ctx, conversationID)
 	if err != nil {
@@ -418,8 +432,17 @@ func (db *commonMsgDatabase) GetMsgBySeqsRange(ctx context.Context, userID strin
 		end = maxSeq
 	}
 	// "begin" and "end" represent the actual startSeq and endSeq values that the user can retrieve.
+	// 当会话无消息或可拉取范围为空时（如 maxSeq=0 导致 end<begin），返回空列表而非错误，避免客户端该会话无法展示
 	if end < begin {
-		return 0, 0, nil, errs.ErrArgs.WrapMsg("seq end < begin")
+		log.ZDebug(ctx, "GetMsgBySeqsRange empty range", "conversationID", conversationID, "begin", begin, "end", end, "minSeq", minSeq, "maxSeq", maxSeq)
+		return minSeq, maxSeq, []*sdkws.MsgData{}, nil
+	}
+	// 单次拉取消息数上限，避免一次返回过多消息导致：
+	//   1）响应体过大，引发 WebSocket 1009（message too big）或 HTTP 超时；
+	//   2）客户端一次性写入本地数据库压力过大，触发卡顿或 ANR。
+	const maxMessagesPerPull = 200
+	if num <= 0 || num > maxMessagesPerPull {
+		num = maxMessagesPerPull
 	}
 	var seqs []int64
 	if end-begin+1 <= num {

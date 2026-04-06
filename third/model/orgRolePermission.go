@@ -2,11 +2,12 @@ package model
 
 import (
 	"context"
+	"time"
+
 	"github.com/openimsdk/open-im-server/v3/tools/db/mongoutil"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"time"
 )
 
 type OrganizationUserRole string
@@ -15,14 +16,18 @@ const (
 	OrganizationUserSuperAdminRole   OrganizationUserRole = "SuperAdmin"
 	OrganizationUserBackendAdminRole OrganizationUserRole = "BackendAdmin"
 	OrganizationUserGroupManagerRole OrganizationUserRole = "GroupManager"
+	OrganizationUserTermManagerRole  OrganizationUserRole = "TermManager"
 	OrganizationUserNormalRole       OrganizationUserRole = "Normal"
 )
 
 type PermissionCode string
 
 const (
-	PermissionCodeModifyNickname PermissionCode = "modify_nickname" // 允许修改昵称
-	PermissionCodeBasic          PermissionCode = "basic"           // 允许发送文件等等
+	PermissionCodeModifyNickname   PermissionCode = "modify_nickname"    // 允许修改昵称
+	PermissionCodeSendFile         PermissionCode = "send_file"          // 允许发送文件
+	PermissionCodeSendBusinessCard PermissionCode = "send_business_card" // 允许发送名片
+	PermissionCodeCreateGroup      PermissionCode = "create_group"       // 允许建群
+	PermissionCodeAddFriend        PermissionCode = "add_friend"         // 允许加好友
 )
 
 type OrganizationRolePermission struct {

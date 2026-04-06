@@ -147,3 +147,26 @@ func Pb2String(pb proto.Message) (string, error) {
 func String2Pb(s string, pb proto.Message) error {
 	return proto.Unmarshal([]byte(s), pb)
 }
+
+// ShouldDeliverSystemMsgToChat 判断系统产生的通知类消息是否要写入会话并下发给客户端。
+// 返回 false 时：不写入聊天缓存/DB、不推送给客户端，用于减少群聊/单聊里大量系统推送刷屏且不影响正常功能。
+// 始终下发：HasReadReceipt（已读回执）、MsgRevokeNotification/DeleteMsgsNotification（撤回/删除）、用户消息；不下发：其余系统通知（如组织/权限/群变更等）。
+func ShouldDeliverSystemMsgToChat(msg *sdkws.MsgData) bool {
+	if msg == nil {
+		return true
+	}
+	if msg.MsgFrom != constant.SysMsgType {
+		return true
+	}
+	if msg.ContentType < constant.NotificationBegin || msg.ContentType > constant.NotificationEnd {
+		return true
+	}
+	switch msg.ContentType {
+	case constant.HasReadReceipt:
+		return true
+	case constant.MsgRevokeNotification, constant.DeleteMsgsNotification:
+		return true
+	default:
+		return false
+	}
+}

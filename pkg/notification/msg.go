@@ -220,8 +220,13 @@ func WithSendMessage(sendMessage *bool) NotificationOptions {
 }
 
 func (s *NotificationSender) send(ctx context.Context, sendID, recvID string, contentType, sessionType int32, m proto.Message, opts ...NotificationOptions) {
+	// 在替换 ctx 前保留 operationID，否则异步队列执行时 RPC 会报 "ctx missing operationID"
+	opID, _ := ctx.Value(constant.OperationID).(string)
+	if opID == "" {
+		opID = idutil.OperationIDGenerator()
+	}
 	// 创建新的根上下文，避免依赖原有上下文的取消
-	ctx = context.Background()
+	ctx = context.WithValue(context.Background(), constant.OperationID, opID)
 	// 增加超时时间到10秒，避免大规模并发时消息处理超时
 	ctx, cancel := context.WithTimeout(ctx, time.Second*time.Duration(10))
 	defer cancel()

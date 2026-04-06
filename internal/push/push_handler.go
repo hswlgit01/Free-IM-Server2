@@ -29,19 +29,27 @@ import (
 )
 
 type ConsumerHandler struct {
-	//pushConsumerGroup      mq.Consumer
-	offlinePusher          offlinepush.OfflinePusher
-	onlinePusher           OnlinePusher
-	pushDatabase           controller.PushDatabase
-	onlineCache            *rpccache.OnlineCache
-	groupLocalCache        *rpccache.GroupLocalCache
+	// offlinePusher 负责「离线推送」能力（厂商通道：个推/FCM/极光等）
+	offlinePusher offlinepush.OfflinePusher
+	// onlinePusher 负责「在线推送」，即通过 msggateway 的长连接实时下发
+	onlinePusher OnlinePusher
+	// pushDatabase 持久化推送记录/状态的存储抽象
+	pushDatabase controller.PushDatabase
+	// onlineCache 缓存在线状态和设备信息，用于决定哪些用户可以在线推送
+	onlineCache *rpccache.OnlineCache
+	// groupLocalCache 本地群缓存，加速获取群成员列表等
+	groupLocalCache *rpccache.GroupLocalCache
+	// conversationLocalCache 会话本地缓存，用于快速获取会话设置（免打扰等）
 	conversationLocalCache *rpccache.ConversationLocalCache
-	webhookClient          *webhook.Client
-	config                 *Config
-	userClient             *rpcli.UserClient
-	groupClient            *rpcli.GroupClient
-	msgClient              *rpcli.MsgClient
-	conversationClient     *rpcli.ConversationClient
+	// webhookClient 支持在推送前/后触发自定义 Webhook（如审计/埋点）
+	webhookClient *webhook.Client
+	// config 推送模块完整配置
+	config *Config
+	// 以下为各 RPC 客户端，用于查询用户/群/会话/消息相关数据
+	userClient         *rpcli.UserClient
+	groupClient        *rpcli.GroupClient
+	msgClient          *rpcli.MsgClient
+	conversationClient *rpcli.ConversationClient
 }
 
 func NewConsumerHandler(ctx context.Context, config *Config, database controller.PushDatabase, offlinePusher offlinepush.OfflinePusher, rdb redis.UniversalClient, client discovery.Conn) (*ConsumerHandler, error) {

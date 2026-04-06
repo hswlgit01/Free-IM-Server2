@@ -15,10 +15,25 @@
 package api
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/openimsdk/open-im-server/v3/protocol/group"
+	"github.com/openimsdk/open-im-server/v3/protocol/sdkws"
 	"github.com/openimsdk/tools/a2r"
+	"github.com/openimsdk/tools/apiresp"
+	"github.com/openimsdk/tools/errs"
 )
+
+// setGroupInfoHTTPReq 兼容两种请求格式：标准 groupInfoForSet 或平铺的 groupID/groupName（如 Flutter SDK）
+type setGroupInfoHTTPReq struct {
+	GroupInfoForSet *sdkws.GroupInfoForSet `json:"groupInfoForSet"`
+	GroupID         string                 `json:"groupID"`
+	GroupName       string                 `json:"groupName"`
+	Notification    string                 `json:"notification"`
+	Introduction    string                 `json:"introduction"`
+	FaceURL         string                 `json:"faceURL"`
+}
 
 type GroupApi struct {
 	Client group.GroupClient
@@ -33,7 +48,36 @@ func (o *GroupApi) CreateGroup(c *gin.Context) {
 }
 
 func (o *GroupApi) SetGroupInfo(c *gin.Context) {
-	a2r.Call(c, group.GroupClient.SetGroupInfo, o.Client)
+	var body setGroupInfoHTTPReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		apiresp.GinError(c, errs.ErrArgs.WithDetail(err.Error()).Wrap())
+		return
+	}
+	// 兼容：若客户端发送平铺的 groupID/groupName（如部分 SDK），则组装为 groupInfoForSet
+	infoForSet := body.GroupInfoForSet
+	if infoForSet == nil || infoForSet.GroupID == "" {
+		if body.GroupID == "" {
+			apiresp.GinError(c, errs.ErrArgs.WrapMsg("groupID is required"))
+			return
+		}
+		infoForSet = &sdkws.GroupInfoForSet{
+			GroupID:      body.GroupID,
+			GroupName:    strings.TrimSpace(body.GroupName),
+			Notification: body.Notification,
+			Introduction: body.Introduction,
+			FaceURL:      body.FaceURL,
+		}
+	} else if infoForSet.GroupName != "" {
+		infoForSet.GroupName = strings.TrimSpace(infoForSet.GroupName)
+	}
+	req := &group.SetGroupInfoReq{GroupInfoForSet: infoForSet}
+	// NOTE: use gin.Context as context.Context so rpc client interceptor can read operationID from it.
+	resp, err := o.Client.SetGroupInfo(c, req)
+	if err != nil {
+		apiresp.GinError(c, err)
+		return
+	}
+	apiresp.GinSuccess(c, resp)
 }
 
 func (o *GroupApi) SetGroupInfoEx(c *gin.Context) {

@@ -53,36 +53,34 @@ data:
     password: '' # openIM123
     # Authentication source for database authentication, if use root user, set it to admin
     authSource: openim_v3
-    # Maximum number of connections in the connection pool
-    maxPoolSize: 100
-    # Maximum number of retry attempts for a failed database connection
+    maxPoolSize: 300
     maxRetry: 10
 
   local-cache.yml: |
     user:
       topic: DELETE_CACHE_USER
-      slotNum: 100
-      slotSize: 2000
-      successExpire: 300
-      failedExpire: 5
+      slotNum: 200
+      slotSize: 3000
+      successExpire: 600
+      failedExpire: 10
     group:
       topic: DELETE_CACHE_GROUP
-      slotNum: 100
-      slotSize: 2000
-      successExpire: 300
-      failedExpire: 5
+      slotNum: 200
+      slotSize: 3000
+      successExpire: 600
+      failedExpire: 10
     friend:
       topic: DELETE_CACHE_FRIEND
-      slotNum: 100
-      slotSize: 2000
-      successExpire: 300
-      failedExpire: 5
+      slotNum: 200
+      slotSize: 3000
+      successExpire: 600
+      failedExpire: 10
     conversation:
       topic: DELETE_CACHE_CONVERSATION
-      slotNum: 100
-      slotSize: 2000
-      successExpire: 300
-      failedExpire: 5
+      slotNum: 200
+      slotSize: 3000
+      successExpire: 600
+      failedExpire: 10
 
   openim-api.yml: |
     api:
@@ -146,22 +144,30 @@ data:
     listenIP: 0.0.0.0
 
     longConnSvr:
-      # WebSocket listening ports, must match the number of rpc.ports
       ports: [ 10001 ]
-      # Maximum number of WebSocket connections
       websocketMaxConnNum: 100000
-      # Maximum length of the entire WebSocket message packet
-      websocketMaxMsgLen: 1048576 # 1MB (原值: 4096/4KB)
-      # WebSocket connection handshake timeout in seconds
+      websocketMaxMsgLen: 1048576
       websocketTimeout: 10
+      registerChanBuffer: 5000
+      unregisterChanBuffer: 5000
+      kickHandlerChanBuffer: 5000
+      onlineStatusConcurrent: 16
+      onlineStatusChanBuffer: 256
+      onlineStatusBatchSize: 200
+      userStateChanBuffer: 20000
+      pushQueueWorkers: 1024
+      pushQueueMessageSize: 16384
 
   openim-msgtransfer.yml: |
     prometheus:
-      # Enable or disable Prometheus monitoring
       enable: true
-      # List of ports that Prometheus listens on; each port corresponds to an instance of monitoring. Ensure these are managed accordingly
-      # Because four instances have been launched, four ports need to be specified
       ports: [ 12020 ]
+    batcherSize: 2000
+    batcherWorker: 150
+    batcherIntervalMs: 100
+    batcherDataBuffer: 3000
+    batcherSubChanBuffer: 300
+    batcherHasReadChanBuf: 20000
 
   openim-push.yml: |
     rpc:
@@ -183,8 +189,11 @@ data:
       # List of ports that Prometheus listens on; these must match the number of rpc.ports to ensure correct monitoring setup
       ports: [ 12170 ]
 
-    maxConcurrentWorkers: 3
-    #Use geTui for offline push notifications, or choose fcm or jpns; corresponding configuration settings must be specified.
+    maxConcurrentWorkers: 50
+    minConcurrentWorkers: 1
+    onlinePushBatchSmall: 100
+    onlinePushBatchMid: 150
+    onlinePushBatchLarge: 250
     enable:
     geTui:
       pushUrl: https://restapi.getui.com/v2/$appId
@@ -431,7 +440,7 @@ data:
     clusterMode: false
     db: 0
     maxRetry: 10
-    poolSize: 100
+    poolSize: 500
 
   minio.yml: |
     # Name of the bucket in MinIO

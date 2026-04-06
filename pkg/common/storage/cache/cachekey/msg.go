@@ -21,6 +21,7 @@ import (
 const (
 	sendMsgFailedFlag = "SEND_MSG_FAILED_FLAG:"
 	messageCache      = "MSG_CACHE:"
+	messageIdempotent = "MSG_IDEMPOTENT:" // 新增：消息幂等性键前缀
 )
 
 func GetMsgCacheKey(conversationID string, seq int64) string {
@@ -29,4 +30,9 @@ func GetMsgCacheKey(conversationID string, seq int64) string {
 
 func GetSendMsgKey(id string) string {
 	return sendMsgFailedFlag + id
+}
+
+// 新增：获取消息幂等性检查的键
+func GetMsgIdempotentKey(clientMsgID string) string {
+	return messageIdempotent + clientMsgID
 }

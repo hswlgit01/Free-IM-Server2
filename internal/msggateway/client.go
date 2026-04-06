@@ -64,23 +64,23 @@ const (
 type PingPongHandler func(string) error
 
 type Client struct {
-	w              *sync.Mutex
-	conn           LongConn
-	PlatformID     int    `json:"platformID"`
-	IsCompress     bool   `json:"isCompress"`
-	UserID         string `json:"userID"`
-	IsBackground   bool   `json:"isBackground"`
-	SDKType        string `json:"sdkType"`
-	Encoder        Encoder
-	ctx            *UserConnContext
-	longConnServer LongConnServer
-	closed         atomic.Bool
-	closedErr      error
-	token          string
-	hbCtx          context.Context
-	hbCancel       context.CancelFunc
-	subLock        *sync.Mutex
-	subUserIDs     map[string]struct{} // client conn subscription list
+	w              *sync.Mutex         // 保护写操作的互斥锁，保证同一连接上写消息串行执行
+	conn           LongConn            // 底层长连接实现（目前是 WebSocket）
+	PlatformID     int                 `json:"platformID"`   // 平台 ID，区分 iOS/Android/Web/PC
+	IsCompress     bool                `json:"isCompress"`   // 是否开启 gzip 压缩
+	UserID         string              `json:"userID"`       // 当前连接所属用户
+	IsBackground   bool                `json:"isBackground"` // 是否处于前后台状态（客户端上报）
+	SDKType        string              `json:"sdkType"`      // SDK 类型（GoSDK/JsSDK）
+	Encoder        Encoder             // 编解码器，不同 SDK 类型使用不同协议
+	ctx            *UserConnContext    // 连接上下文（包含 query/header 等关键信息）
+	longConnServer LongConnServer      // 长连接服务实例，用于转发消息到下游 RPC
+	closed         atomic.Bool         // 标记连接是否已关闭
+	closedErr      error               // 记录连接关闭原因
+	token          string              // 该连接使用的 token（用于调试/审计）
+	hbCtx          context.Context     // 心跳协程上下文
+	hbCancel       context.CancelFunc  // 心跳协程取消函数
+	subLock        *sync.Mutex         // 订阅列表读写锁
+	subUserIDs     map[string]struct{} // 当前连接订阅的用户 ID 列表，用于状态变更推送
 }
 
 // ResetClient updates the client's state with new connection and context information.

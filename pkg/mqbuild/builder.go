@@ -16,7 +16,8 @@ type Builder interface {
 }
 
 func NewBuilder(kafka *config.Kafka) Builder {
-	if config.Standalone() {
+	// standalone 模式下默认使用内存队列(simmq)；若 kafka.UseKafka 为 true 则仍使用 Kafka
+	if config.Standalone() && !kafka.UseKafka {
 		return standaloneBuilder{}
 	}
 	return &kafkaBuilder{

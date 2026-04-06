@@ -24,6 +24,7 @@ import (
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
 
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache"
+	"github.com/openimsdk/tools/log"
 	"github.com/openimsdk/tools/s3"
 	"github.com/openimsdk/tools/s3/cont"
 	"github.com/redis/go-redis/v9"
@@ -90,10 +91,14 @@ func (s *s3Database) SetObject(ctx context.Context, info *model.Object) error {
 }
 
 func (s *s3Database) AccessURL(ctx context.Context, name string, expire time.Duration, opt *s3.AccessURLOption) (time.Time, string, error) {
-	obj, err := s.cache.GetName(ctx, s.s3.Engine(), name)
+	engine := s.s3.Engine()
+	log.ZDebug(ctx, "S3Database.AccessURL request", "name", name, "engine", engine)
+	obj, err := s.cache.GetName(ctx, engine, name)
 	if err != nil {
+		log.ZWarn(ctx, "S3Database.AccessURL object lookup failed", err, "name", name, "engine", engine)
 		return time.Time{}, "", err
 	}
+	log.ZDebug(ctx, "S3Database.AccessURL object resolved", "name", name, "queryEngine", engine, "objEngine", obj.Engine, "key", obj.Key)
 	if opt == nil {
 		opt = &s3.AccessURLOption{}
 	}

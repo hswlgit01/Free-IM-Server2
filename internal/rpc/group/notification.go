@@ -347,7 +347,16 @@ func (g *NotificationSender) GroupInfoSetNameNotification(ctx context.Context, t
 		return
 	}
 	g.setVersion(ctx, &tips.GroupMemberVersion, &tips.GroupMemberVersionID, database.GroupMemberVersionName, tips.Group.GroupID)
-	g.Notification(ctx, mcontext.GetOpUserID(ctx), tips.Group.GroupID, constant.GroupInfoSetNameNotification, tips)
+	// This is a system notification (contentType=1520). msg server requires a valid SenderNickname,
+	// otherwise it will skip sending and the client won't receive it.
+	g.Notification(
+		ctx,
+		mcontext.GetOpUserID(ctx),
+		tips.Group.GroupID,
+		constant.GroupInfoSetNameNotification,
+		tips,
+		notification.WithRpcGetUserName(),
+	)
 }
 
 func (g *NotificationSender) GroupInfoSetAnnouncementNotification(ctx context.Context, tips *sdkws.GroupInfoSetAnnouncementTips, sendMessage *bool) {

@@ -64,7 +64,11 @@ func NewClient(pushConf *config.Push, cache cache.ThirdCache) *Client {
 		tokenExpireTime: tokenExpireTime,
 		taskIDTTL:       taskIDTTL,
 		pushConf:        pushConf,
-		httpClient:      httputil.NewHTTPClient(httputil.NewClientConfig()),
+		// 适当放大 HTTP 超时时间，避免在大批量 alias 推送时频繁超时
+		httpClient: httputil.NewHTTPClient(&httputil.ClientConfig{
+			// 默认其他字段保持不变，仅将超时时间从 3 秒提升到 8 秒
+			Timeout: 8 * time.Second,
+		}),
 	}
 }
 
@@ -88,20 +92,12 @@ func (g *Client) Push(ctx context.Context, userIDs []string, title, content stri
 		if len(userIDs) > maxNum {
 			s := splitter.NewSplitter(maxNum, userIDs)
 			wg := sync.WaitGroup{}
-			wg.Add(len(s.GetSplitResult()))
 			for i, v := range s.GetSplitResult() {
-				go func(index int, userIDs []string) {
+				wg.Add(1)
+				// 每个分片只推送自己这批 alias，避免重复推送整批 userIDs
+				go func(index int, batchUserIDs []string) {
 					defer wg.Done()
-					for i := 0; i < len(userIDs); i += maxNum {
-						end := i + maxNum
-						if end > len(userIDs) {
-							end = len(userIDs)
-						}
-						if err = g.batchPush(ctx, token, userIDs[i:end], pushReq); err != nil {
-							log.ZError(ctx, "batchPush failed", err, "index", index, "token", token, "req", pushReq)
-						}
-					}
-					if err = g.batchPush(ctx, token, userIDs, pushReq); err != nil {
+					if err := g.batchPush(ctx, token, batchUserIDs, pushReq); err != nil {
 						log.ZError(ctx, "batchPush failed", err, "index", index, "token", token, "req", pushReq)
 					}
 				}(i, v.Item)

@@ -2,67 +2,26 @@ networks:
   openim:
     driver: bridge
 
-services:
-  environment:
-    - TZ=Asia/Shanghai
 
-  mongodb:
-    image: "${MONGO_IMAGE}"
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: mongo
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile"]
     ports:
       - "37017:27017"
-    container_name: mongo
-    command: >
-      bash -c '
-      docker-entrypoint.sh mongod --wiredTigerCacheSizeGB $$wiredTigerCacheSizeGB --replSet rs0 --keyFile /etc/mongo/mongo-keyfile --auth &
-      until mongosh --eval "db.runCommand({ ping: 1 })" &>/dev/null; do
-        echo "Waiting for MongoDB to start..."
-        sleep 1
-      done &&
-      mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval "
-      try{ 
-        rs.status().ok
-      }catch(e){
-        rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"localhost:27017\"}]})
-      }
-
-      " &&
-      mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval "
-      db = db.getSiblingDB(\"$$MONGO_INITDB_DATABASE\");
-      if (!db.getUser(\"$$MONGO_OPENIM_USERNAME\")) {
-        db.createUser({
-          user: \"$$MONGO_OPENIM_USERNAME\",
-          pwd: \"$$MONGO_OPENIM_PASSWORD\",
-          roles: [{role: \"readWrite\", db: \"$$MONGO_INITDB_DATABASE\"}]
-        });
-        print(\"User created successfully: \");
-        print(\"Username: $$MONGO_OPENIM_USERNAME\");
-        print(\"Password: $$MONGO_OPENIM_PASSWORD\");
-        print(\"Database: $$MONGO_INITDB_DATABASE\");
-      } else {
-        print(\"User already exists in database: $$MONGO_INITDB_DATABASE, Username: $$MONGO_OPENIM_USERNAME\");
-      }
-      " &&
-      tail -f /dev/null
-      '
-    volumes:
-      - "${DATA_DIR}/components/mongodb/data/db:/data/db"
-      - "${DATA_DIR}/components/mongodb/data/logs:/data/logs"
-      - "${DATA_DIR}/components/mongodb/mongo:/etc/mongo"
-      - "${MONGO_BACKUP_DIR:-./data/backup}:/data/backup"
     environment:
-      - TZ=Asia/Shanghai
-      - wiredTigerCacheSizeGB=1
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=openIM123
-      - MONGO_INITDB_DATABASE=openim_v3
-      - MONGO_OPENIM_USERNAME=openIM
-      - MONGO_OPENIM_PASSWORD=openIM123
-    restart: always
-    networks:
-      - openim
-
-  environment:
-    - TZ=Asia/Shanghai
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: openIM123
+    volumes:
+      - ./mongo/data:/data/db
+      - ./mongo/init/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - ./mongo/keyfile:/etc/mongo-keyfile:ro
+#
+#  environment:
+#    - TZ=Asia/Shanghai
 
   redis:
     image: "${REDIS_IMAGE}"
@@ -81,8 +40,8 @@ services:
     networks:
       - openim
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   etcd:
     image: "${ETCD_IMAGE}"
@@ -106,24 +65,25 @@ services:
     networks:
       - openim
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   kafka:
     image: "${KAFKA_IMAGE}"
     container_name: kafka
-    user: root
+    # 建议去掉 user: root，改用宿主机权限修复
     restart: always
     ports:
       - "19094:9094"
     volumes:
       - "${DATA_DIR}/components/kafka:/bitnami/kafka"
     environment:
-      #KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
       TZ: Asia/Shanghai
       KAFKA_CFG_NODE_ID: 0
       KAFKA_CFG_PROCESS_ROLES: controller,broker
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      # 必须增加一个固定的集群ID，防止重启后元数据不匹配
+      KAFKA_KRAFT_CLUSTER_ID: "6666666666666666666666"
       KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19094
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
@@ -132,9 +92,9 @@ services:
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - openim
-
-  environment:
-    - TZ=Asia/Shanghai
+#
+#  environment:
+#    - TZ=Asia/Shanghai
 
   minio:
     image: "${MINIO_IMAGE}"
@@ -163,8 +123,8 @@ services:
 #    networks:
 #      - openim
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   openim-admin-front:
     image: ${OPENIM_ADMIN_FRONT_IMAGE}
@@ -175,8 +135,8 @@ services:
     networks:
       - openim
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   prometheus:
     image: ${PROMETHEUS_IMAGE}
@@ -195,8 +155,8 @@ services:
       - '--web.listen-address=:${PROMETHEUS_PORT}'
     network_mode: host
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   alertmanager:
     image: ${ALERTMANAGER_IMAGE}
@@ -211,9 +171,9 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--web.listen-address=:${ALERTMANAGER_PORT}'
     network_mode: host
-
-  environment:
-    - TZ=Asia/Shanghai
+#
+#  environment:
+#    - TZ=Asia/Shanghai
 
   grafana:
     image: ${GRAFANA_IMAGE}
@@ -234,8 +194,8 @@ services:
       - ${DATA_DIR:-./}/components/grafana:/var/lib/grafana
     network_mode: host
 
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai
 
   node-exporter:
     image: ${NODE_EXPORTER_IMAGE}
@@ -253,5 +213,5 @@ services:
       - '--path.rootfs=/rootfs'
       - '--web.listen-address=:19100'
     network_mode: host
-  environment:
-    - TZ=Asia/Shanghai
+#  environment:
+#    - TZ=Asia/Shanghai

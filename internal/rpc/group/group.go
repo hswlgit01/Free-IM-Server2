@@ -252,7 +252,7 @@ func (g *groupServer) CreateGroup(ctx context.Context, req *pbgroup.CreateGroupR
 		return nil, err
 	}
 
-	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(info.OrgRole), thirdModel.PermissionCodeBasic)
+	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(info.OrgRole), thirdModel.PermissionCodeCreateGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -1121,6 +1121,12 @@ func (g *groupServer) deleteMemberAndSetConversationSeq(ctx context.Context, gro
 }
 
 func (g *groupServer) SetGroupInfo(ctx context.Context, req *pbgroup.SetGroupInfoReq) (*pbgroup.SetGroupInfoResp, error) {
+	if req == nil || req.GroupInfoForSet == nil {
+		return nil, errs.ErrArgs.WrapMsg("groupInfoForSet is required")
+	}
+	if req.GroupInfoForSet.GroupID == "" {
+		return nil, errs.ErrArgs.WrapMsg("groupID is required")
+	}
 	var opMember *model.GroupMember
 	if !authverify.IsAppManagerUid(ctx, g.config.Share.IMAdminUserID) {
 		var err error
@@ -1161,7 +1167,9 @@ func (g *groupServer) SetGroupInfo(ctx context.Context, req *pbgroup.SetGroupInf
 	}
 	update := UpdateGroupInfoMap(ctx, req.GroupInfoForSet)
 	if len(update) == 0 {
-		return &pbgroup.SetGroupInfoResp{}, nil
+		log.ZWarn(ctx, "SetGroupInfo: no valid fields to update, groupInfoForSet may have empty values", nil,
+			"groupID", req.GroupInfoForSet.GroupID, "groupName", req.GroupInfoForSet.GroupName)
+		return nil, errs.ErrArgs.WrapMsg("no valid fields to update, at least one of groupName/notification/introduction/faceURL must be set")
 	}
 	if err := g.db.UpdateGroup(ctx, group.GroupID, update); err != nil {
 		return nil, err

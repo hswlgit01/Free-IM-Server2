@@ -59,7 +59,6 @@ type WsServer struct {
 	validate          *validator.Validate
 	disCov            discovery.Conn
 	Compressor
-	//Encoder
 	MessageHandler
 	webhookClient *webhook.Client
 	userClient    *rpcli.UserClient

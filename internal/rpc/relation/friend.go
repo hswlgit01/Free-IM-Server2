@@ -16,6 +16,7 @@ package relation
 
 import (
 	"context"
+
 	thirdModel "github.com/openimsdk/open-im-server/v3/third/model"
 	"github.com/openimsdk/open-im-server/v3/tools/db/mongoutil"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -179,7 +180,7 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 		return nil, err
 	}
 
-	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(fromUser.OrgRole), thirdModel.PermissionCodeBasic)
+	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(fromUser.OrgRole), thirdModel.PermissionCodeAddFriend)
 	if err != nil {
 		return nil, err
 	}

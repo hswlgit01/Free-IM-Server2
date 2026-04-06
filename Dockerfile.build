@@ -1,0 +1,15 @@
+FROM golang:1.23-bullseye
+
+WORKDIR /build
+
+# 安装必要工具
+RUN apt-get update && apt-get install -y \
+  build-essential \
+  git \
+  && rm -rf /var/lib/apt/lists/*
+
+# 设置Go环境变量
+ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+
+CMD ["bash"]

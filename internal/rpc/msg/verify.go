@@ -23,10 +23,12 @@ import (
 
 	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/servererrs"
+	thirdModel "github.com/openimsdk/open-im-server/v3/third/model"
 	"github.com/openimsdk/tools/log"
 	"github.com/openimsdk/tools/utils/datautil"
 	"github.com/openimsdk/tools/utils/encrypt"
 	"github.com/openimsdk/tools/utils/timeutil"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/openimsdk/open-im-server/v3/protocol/constant"
 	"github.com/openimsdk/open-im-server/v3/protocol/msg"
@@ -54,13 +56,29 @@ type MessageRevoked struct {
 }
 
 func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgReq) error {
-	switch data.MsgData.SessionType {
-	case constant.SingleChatType:
-		if datautil.Contain(data.MsgData.SendID, m.config.Share.IMAdminUserID...) {
+	// 屏蔽 imAdmin（及配置中的 IMAdminUserID）发出的消息，不写入、不推送，避免本地/试运行收到系统账号消息
+	if datautil.Contain(data.MsgData.SendID, m.config.Share.IMAdminUserID...) {
+		// Exception: group system notifications (e.g. group name update) must be delivered to apps.
+		// Otherwise, app won't receive updates when ops are performed via IMAdmin/service account.
+		if data.MsgData.ContentType >= constant.GroupNotificationBegin && data.MsgData.ContentType <= constant.GroupInfoSetNameNotification {
 			return nil
 		}
-		if data.MsgData.ContentType <= constant.NotificationEnd &&
-			data.MsgData.ContentType >= constant.NotificationBegin {
+		return errs.ErrNoPermission.WrapMsg("messages from imAdmin are disabled and will not be sent")
+	}
+	// 单聊禁止自己给自己发消息，不该存在此类记录
+	if data.MsgData.SessionType == constant.SingleChatType && data.MsgData.SendID == data.MsgData.RecvID {
+		return errs.ErrNoPermission.WrapMsg("self-to-self messages are not allowed")
+	}
+	// 组织角色：发送文件、发送名片（单聊/群聊均校验发送方）
+	if data.MsgData.SessionType == constant.SingleChatType || data.MsgData.SessionType == constant.ReadGroupChatType {
+		if err := m.checkOrgContentSendPermission(ctx, data.MsgData); err != nil {
+			return err
+		}
+	}
+	switch data.MsgData.SessionType {
+	case constant.SingleChatType:
+		if data.MsgData.ContentType >= constant.NotificationBegin &&
+			data.MsgData.ContentType <= constant.NotificationEnd {
 			return nil
 		}
 		if err := m.webhookBeforeSendSingleMsg(ctx, &m.config.WebhooksConfig.BeforeSendSingleMsg, data); err != nil {
@@ -82,9 +100,7 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		if black {
 			return servererrs.ErrBlockedByPeer.Wrap()
 		}
-		if data.MsgData.SendID == data.MsgData.RecvID {
-			return nil
-		}
+		// 单聊自发自收已在函数开头统一拒绝，此处仅作冗余校验
 		if m.config.RpcConfig.FriendVerify {
 			friend, err := m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
 			if err != nil {
@@ -109,11 +125,8 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 			return nil
 		}
 
-		if datautil.Contain(data.MsgData.SendID, m.config.Share.IMAdminUserID...) {
-			return nil
-		}
-		if data.MsgData.ContentType <= constant.NotificationEnd &&
-			data.MsgData.ContentType >= constant.NotificationBegin {
+		if data.MsgData.ContentType >= constant.NotificationBegin &&
+			data.MsgData.ContentType <= constant.NotificationEnd {
 			return nil
 		}
 		memberIDs, err := m.GroupLocalCache.GetGroupMemberIDMap(ctx, data.MsgData.GroupID)
@@ -230,8 +243,7 @@ func needsUnreadCountExclusion(content []byte) bool {
 }
 
 func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
-	// 强制输出日志,确认函数被调用
-	log.ZWarn(context.Background(), "🔍 [CRITICAL] encapsulateMsgData called", nil, "contentType", msg.ContentType, "sendID", msg.SendID)
+	log.ZDebug(context.Background(), "encapsulateMsgData called", "contentType", msg.ContentType, "sendID", msg.SendID)
 
 	msg.ServerMsgID = GetMsgID(msg.SendID)
 	if msg.SendTime == 0 {
@@ -242,31 +254,26 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 		constant.File, constant.AtText, constant.Merger, constant.Card,
 		constant.Location, constant.Quote, constant.AdvancedText, constant.MarkdownText:
 	case constant.Custom:
-		contentPreview := string(msg.Content)
-		if len(contentPreview) > 200 {
-			contentPreview = contentPreview[:200]
+		// 限制自定义消息（如红包）Content 大小，避免 5000 人群全员推送时单条消息过大导致 websocket close 1009 (message too big)
+		const maxCustomContentSize = 512 * 1024 // 512KB，客户端常见读缓冲远小于此
+		if origLen := len(msg.Content); origLen > maxCustomContentSize {
+			msg.Content = msg.Content[:maxCustomContentSize]
+			log.ZWarn(context.Background(), "Custom message content trimmed to avoid push overflow", nil, "contentType", msg.ContentType, "originalLen", origLen, "maxLen", maxCustomContentSize)
 		}
-		log.ZWarn(context.Background(), "🎯 [CRITICAL] Processing Custom message", nil, "contentType", msg.ContentType, "content", contentPreview)
 		// 确保Options已初始化
 		if msg.Options == nil {
 			msg.Options = make(map[string]bool, 10)
-			log.ZWarn(context.Background(), "✅ [CRITICAL] Initialized Options map", nil)
 		}
 		// 自定义信令消息(如语音/视频通话)不应同步给发送者
 		// 避免自我会话查询错误
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsSenderSync, false)
-		log.ZWarn(context.Background(), "📝 [CRITICAL] Set IsSenderSync=false", nil, "options", msg.Options)
 		// 检查是否需要排除未读计数
 		// 包括通话信令(200-204,2005)、系统通知(910-913)、退款通知(500)等
 		if len(msg.Content) > 0 {
 			shouldExclude := needsUnreadCountExclusion(msg.Content)
-			log.ZWarn(context.Background(), "🔎 [CRITICAL] Checked unread exclusion", nil, "shouldExclude", shouldExclude, "options", msg.Options)
 			if shouldExclude {
 				datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
 				datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
-				log.ZWarn(context.Background(), "❌ [CRITICAL] Set unreadCount=false and offlinePush=false", nil, "finalOptions", msg.Options)
-			} else {
-				log.ZWarn(context.Background(), "✅ [CRITICAL] Message will count as unread", nil, "finalOptions", msg.Options)
 			}
 		}
 	case constant.Revoke:
@@ -286,6 +293,48 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
 	}
+}
+
+// checkOrgContentSendPermission 按 organization_role_permission 校验发送文件、名片（无 org 或未配置库则跳过）
+func (m *msgServer) checkOrgContentSendPermission(ctx context.Context, msgData *sdkws.MsgData) error {
+	if m.mongoDatabase == nil {
+		return nil
+	}
+	var perm thirdModel.PermissionCode
+	switch msgData.ContentType {
+	case constant.File, constant.Picture, constant.Video, constant.Voice:
+		perm = thirdModel.PermissionCodeSendFile
+	case constant.Card:
+		perm = thirdModel.PermissionCodeSendBusinessCard
+	default:
+		return nil
+	}
+	if msgData.ContentType >= constant.NotificationBegin && msgData.ContentType <= constant.NotificationEnd {
+		return nil
+	}
+	if datautil.Contain(msgData.SendID, m.config.Share.IMAdminUserID...) {
+		return nil
+	}
+	sender, err := m.UserLocalCache.GetUserInfo(ctx, msgData.SendID)
+	if err != nil {
+		return err
+	}
+	if sender.GetOrgId() == "" {
+		return nil
+	}
+	orgID, err := primitive.ObjectIDFromHex(sender.GetOrgId())
+	if err != nil {
+		return nil
+	}
+	dao := thirdModel.NewOrganizationRolePermissionDao(m.mongoDatabase)
+	ok, err := dao.ExistPermission(ctx, orgID, thirdModel.OrganizationUserRole(sender.GetOrgRole()), perm)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errs.ErrNoPermission.WrapMsg("no org permission")
+	}
+	return nil
 }
 
 func GetMsgID(sendID string) string {

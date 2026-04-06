@@ -16,6 +16,7 @@ import (
 )
 
 type OfflinePushConsumerHandler struct {
+	// offlinePusher 为真正执行厂商离线推送（个推 / FCM / 极光等）的适配实现
 	offlinePusher offlinepush.OfflinePusher
 }
 

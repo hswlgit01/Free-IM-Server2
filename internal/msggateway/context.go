@@ -28,12 +28,12 @@ import (
 )
 
 type UserConnContext struct {
-	RespWriter http.ResponseWriter
-	Req        *http.Request
-	Path       string
-	Method     string
-	RemoteAddr string
-	ConnID     string
+	RespWriter http.ResponseWriter // 原始响应 writer，用于返回 HTTP/WS 错误
+	Req        *http.Request       // 原始 HTTP 请求
+	Path       string              // 请求路径
+	Method     string              // HTTP 方法
+	RemoteAddr string              // 远端地址（支持从 X-Forwarded-For 拼接真实 IP）
+	ConnID     string              // 为每条连接生成的唯一 ID，用于日志链路追踪
 }
 
 func (c *UserConnContext) Deadline() (deadline time.Time, ok bool) {
@@ -188,14 +188,17 @@ func (c *UserConnContext) GetBackground() bool {
 func (c *UserConnContext) ParseEssentialArgs() error {
 	_, exists := c.Query(Token)
 	if !exists {
+		// 连接必须携带 token，用于鉴权；为空直接拒绝，避免未登录/伪造连接长期占用资源
 		return servererrs.ErrConnArgsErr.WrapMsg("token is empty")
 	}
 	_, exists = c.Query(WsUserID)
 	if !exists {
+		// sendID = userID；缺失说明客户端没有按照约定传 userID
 		return servererrs.ErrConnArgsErr.WrapMsg("sendID is empty")
 	}
 	platformIDStr, exists := c.Query(PlatformID)
 	if !exists {
+		// 平台 ID 为空会导致多端登录策略、埋点统计等异常
 		return servererrs.ErrConnArgsErr.WrapMsg("platformID is empty")
 	}
 	_, err := strconv.Atoi(platformIDStr)

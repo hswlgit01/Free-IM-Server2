@@ -17,6 +17,7 @@ package conversation
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/openimsdk/open-im-server/v3/pkg/dbbuild"
@@ -47,6 +48,8 @@ type conversationServer struct {
 	pbconversation.UnimplementedConversationServer
 	conversationDatabase controller.ConversationDatabase
 
+	// conversationNotificationSender 用于构造并发送会话相关的系统通知
+	// （例如：会话变更、置顶、免打扰设置变化等）
 	conversationNotificationSender *ConversationNotificationSender
 	config                         *Config
 
@@ -352,7 +355,9 @@ func (c *conversationServer) CreateSingleChatConversations(ctx context.Context,
 
 		err := c.conversationDatabase.CreateConversation(ctx, []*dbModel.Conversation{&conversation})
 		if err != nil {
-			log.ZWarn(ctx, "create conversation failed", err, "conversation", conversation)
+			if !strings.Contains(err.Error(), "E11000") {
+				log.ZWarn(ctx, "create conversation failed", err, "conversation", conversation)
+			}
 		}
 
 		c.webhookAfterCreateSingleChatConversations(ctx, &c.config.WebhooksConfig.AfterCreateSingleChatConversations, &conversation)
@@ -367,7 +372,9 @@ func (c *conversationServer) CreateSingleChatConversations(ctx context.Context,
 
 		err = c.conversationDatabase.CreateConversation(ctx, []*dbModel.Conversation{&conversation2})
 		if err != nil {
-			log.ZWarn(ctx, "create conversation failed", err, "conversation2", conversation)
+			if !strings.Contains(err.Error(), "E11000") {
+				log.ZWarn(ctx, "create conversation failed", err, "conversation2", conversation2)
+			}
 		}
 
 		c.webhookAfterCreateSingleChatConversations(ctx, &c.config.WebhooksConfig.AfterCreateSingleChatConversations, &conversation2)

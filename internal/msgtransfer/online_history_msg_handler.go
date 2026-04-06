@@ -215,8 +215,8 @@ func (och *OnlineHistoryRedisConsumerHandler) categorizeMessageLists(totalMsgs [
 	for _, v := range totalMsgs {
 		options := msgprocessor.Options(v.message.Options)
 		if !options.IsNotNotification() {
-			// clone msg from notificationMsg
-			if options.IsSendMsg() {
+			// clone msg from notificationMsg；仅当需要下发给聊天会话时才写入并推送，避免大量系统通知刷屏
+			if options.IsSendMsg() && msgprocessor.ShouldDeliverSystemMsgToChat(v.message) {
 				msg := proto.Clone(v.message).(*sdkws.MsgData)
 				// message
 				if v.message.Options != nil {

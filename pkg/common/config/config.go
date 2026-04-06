@@ -82,6 +82,7 @@ type Mongo struct {
 	Tls         TLSConfig `yaml:"tls"`
 }
 type Kafka struct {
+	UseKafka           bool     `yaml:"useKafka"`
 	Username           string   `yaml:"username"`
 	Password           string   `yaml:"password"`
 	ProducerAck        string   `yaml:"producerAck"`
@@ -188,6 +189,7 @@ type MsgGateway struct {
 	Prometheus  Prometheus `yaml:"prometheus"`
 	ListenIP    string     `yaml:"listenIP"`
 	LongConnSvr struct {
+		// Ports 为网关实际对外暴露的 WebSocket 端口列表
 		Ports               []int `yaml:"ports"`
 		WebsocketMaxConnNum int   `yaml:"websocketMaxConnNum"`
 		WebsocketMaxMsgLen  int   `yaml:"websocketMaxMsgLen"`

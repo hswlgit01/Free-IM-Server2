@@ -59,9 +59,14 @@ const (
 	Conversation_ClearUserConversationMsg_FullMethodName                = "/openim.conversation.conversation/ClearUserConversationMsg"
 )
 
-// ConversationClient is the client API for Conversation service.
+// ConversationClient 是会话服务的 gRPC 客户端接口。
+//   - 作用：封装了所有与「会话」相关的 RPC 调用，例如获取会话列表、创建会话、更新会话、增量同步会话等。
+//   - 使用方式：业务方只需要持有一个 grpc.ClientConn，然后通过 NewConversationClient 创建实例，
+//     再调用对应方法即可完成远程调用。
+//   - 线程安全：gRPC 的 ClientConnInterface 是并发安全的，因此同一个 ConversationClient 可以在多协程复用。
 //
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+// ctx 关闭、流式 RPC 等语义说明详见：
+// https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream
 type ConversationClient interface {
 	GetConversation(ctx context.Context, in *GetConversationReq, opts ...grpc.CallOption) (*GetConversationResp, error)
 	GetSortedConversationList(ctx context.Context, in *GetSortedConversationListReq, opts ...grpc.CallOption) (*GetSortedConversationListResp, error)
@@ -337,9 +342,18 @@ func (c *conversationClient) ClearUserConversationMsg(ctx context.Context, in *C
 	return out, nil
 }
 
-// ConversationServer is the server API for Conversation service.
-// All implementations must embed UnimplementedConversationServer
-// for forward compatibility.
+// ConversationServer 是会话服务的 gRPC 服务端接口。
+// - 作用：定义了「会话」领域对外暴露的全部 RPC 能力，包括：
+//   - 单聊/群聊会话创建、更新
+//   - 会话列表查询（排序、过滤）
+//   - 会话的未读/最大最小 seq 维护
+//   - 用于客户端首轮同步的 GetFullOwnerConversationIDs / GetIncrementalConversation 等
+//   - 实现方式：实际业务实现应定义一个结构体（如 conversationServer），
+//     实现下面所有方法，并内嵌 UnimplementedConversationServer 以保证向前兼容。
+//   - 注册：通过 RegisterConversationServer(grpcServer, srv) 将实现注册到 gRPC Server。
+//
+// 注意：所有方法都是普通的 unary RPC，没有流式 RPC。
+// 为了避免向前兼容问题，接口要求实现方必须内嵌 UnimplementedConversationServer。
 type ConversationServer interface {
 	GetConversation(context.Context, *GetConversationReq) (*GetConversationResp, error)
 	GetSortedConversationList(context.Context, *GetSortedConversationListReq) (*GetSortedConversationListResp, error)
@@ -368,11 +382,12 @@ type ConversationServer interface {
 	mustEmbedUnimplementedConversationServer()
 }
 
-// UnimplementedConversationServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
+// UnimplementedConversationServer 提供了 ConversationServer 接口的「空实现」。
+//   - 作用：作为默认实现被业务结构体内嵌，从而在未来 proto 新增方法时，旧代码仍能通过编译。
+//   - 原理：每个 RPC 方法都返回 codes.Unimplemented，提示调用方该方法未实现。
+//   - 嵌入方式：必须以「值类型」内嵌，而不是 *UnimplementedConversationServer 指针，
+//     否则在未实现方法被调用时可能出现 nil 指针 panic。RegisterConversationServer 中的
+//     testEmbeddedByValue() 逻辑专门用于在启动阶段提前检查这一点。
 type UnimplementedConversationServer struct{}
 
 func (UnimplementedConversationServer) GetConversation(context.Context, *GetConversationReq) (*GetConversationResp, error) {
@@ -450,9 +465,10 @@ func (UnimplementedConversationServer) ClearUserConversationMsg(context.Context,
 func (UnimplementedConversationServer) mustEmbedUnimplementedConversationServer() {}
 func (UnimplementedConversationServer) testEmbeddedByValue()                      {}
 
-// UnsafeConversationServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to ConversationServer will
-// result in compilation errors.
+// UnsafeConversationServer 可选接口：实现该接口可以「放弃向前兼容」。
+//   - 一般不建议使用：如果未来在 ConversationServer 新增了方法，没有及时实现会导致编译错误，
+//     而不是像内嵌 UnimplementedConversationServer 那样在运行时返回 Unimplemented。
+//   - 仅在你非常确定不会依赖默认空实现、且希望用编译错误强制提醒自己补全实现时才考虑使用。
 type UnsafeConversationServer interface {
 	mustEmbedUnimplementedConversationServer()
 }

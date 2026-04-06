@@ -16,6 +16,7 @@ package msg
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/openimsdk/open-im-server/v3/pkg/common/prommetrics"
@@ -70,6 +71,15 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 				log.ZPanic(ctx, "sendMsg panic", errs.ErrPanic(r))
 			}
 		}()
+
+		// 系统消息（单聊/群聊）无有效发送者昵称时不下发，避免客户端出现 null:[otherMessage]
+		if req.MsgData.MsgFrom == constant.SysMsgType {
+			nick := strings.TrimSpace(req.MsgData.SenderNickname)
+			if nick == "" || strings.EqualFold(nick, "null") || strings.EqualFold(nick, "nil") {
+				log.ZDebug(ctx, "skip send: sys msg without valid sender nickname", "sessionType", req.MsgData.SessionType, "contentType", req.MsgData.ContentType, "sendID", req.MsgData.SendID)
+				return
+			}
+		}
 
 		// 创建新上下文以防原始上下文超时
 		ctxTimeout, cancel := context.WithTimeout(context.Background(), time.Minute*5)

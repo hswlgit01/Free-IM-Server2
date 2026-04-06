@@ -17,6 +17,8 @@ package msg
 import (
 	"context"
 
+	"go.mongodb.org/mongo-driver/mongo"
+
 	"github.com/openimsdk/open-im-server/v3/pkg/util/crypto"
 	"github.com/openimsdk/tools/log"
 
@@ -75,6 +77,7 @@ type msgServer struct {
 	config                 *Config                          // Global configuration settings.
 	webhookClient          *webhook.Client
 	conversationClient     *rpcli.ConversationClient
+	mongoDatabase          *mongo.Database // organization_role_permission（发送文件/名片）
 }
 
 func (m *msgServer) addInterceptorHandler(interceptorFunc ...MessageInterceptorFunc) {
@@ -165,6 +168,8 @@ func Start(ctx context.Context, config *Config, client discovery.Conn, server gr
 
 	s.notificationSender = notification.NewNotificationSender(&config.NotificationConfig, notification.WithLocalSendMsg(s.SendMsg))
 	s.msgNotificationSender = NewMsgNotificationSender(config, notification.WithLocalSendMsg(s.SendMsg))
+
+	s.mongoDatabase = mgocli.GetDB()
 
 	msg.RegisterMsgServer(server, s)
 

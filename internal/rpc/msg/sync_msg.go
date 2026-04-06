@@ -28,36 +28,78 @@ import (
 	"github.com/openimsdk/tools/utils/timeutil"
 )
 
+// maxTotalMessagesPerPullResponse：
+//   - 说明：限制一次 PullMessageBySeqs 响应中「所有会话」加起来最多返回多少条消息。
+//   - 目的：防止老账号/多会话场景下，单次返回过多消息导致：
+//     1）响应体过大，触发 WebSocket 1009（message too big）；
+//     2）网络传输和客户端解包耗时过长，放大超时风险。
+const maxTotalMessagesPerPullResponse = 500
+
+// maxSeqRangesPerRequest 单次请求允许的会话数（SeqRange）上限，防止老版本客户端一次带上全部会话导致响应体过大、同步异常或 1009
+const maxSeqRangesPerRequest = 100
+
 func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessageBySeqsReq) (*sdkws.PullMessageBySeqsResp, error) {
 	resp := &sdkws.PullMessageBySeqsResp{}
 	resp.Msgs = make(map[string]*sdkws.PullMsgs)
 	resp.NotificationMsgs = make(map[string]*sdkws.PullMsgs)
-	for _, seq := range req.SeqRanges {
+	var totalMsgCount int
+	// 老版本客户端可能一次请求所有会话，导致响应体过大、延迟或 1009；仅处理前 N 个会话，其余需客户端分次拉取或升级后分页
+	seqRanges := req.SeqRanges
+	if len(seqRanges) > maxSeqRangesPerRequest {
+		log.ZWarn(ctx, "PullMessageBySeqs: too many seqRanges, truncating to protect server and avoid message too big", nil,
+			"requested", len(req.SeqRanges), "processing", maxSeqRangesPerRequest, "userID", req.UserID)
+		seqRanges = seqRanges[:maxSeqRangesPerRequest]
+	}
+	for _, seq := range seqRanges {
+		if totalMsgCount >= maxTotalMessagesPerPullResponse {
+			if !msgprocessor.IsNotification(seq.ConversationID) {
+				resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
+			}
+			continue
+		}
 		if !msgprocessor.IsNotification(seq.ConversationID) {
 			conversation, err := m.ConversationLocalCache.GetConversation(ctx, req.UserID, seq.ConversationID)
 			if err != nil {
-				log.ZError(ctx, "GetConversation error", err, "conversationID", seq.ConversationID)
+				log.ZWarn(ctx, "GetConversation not found or error, return empty", err, "conversationID", seq.ConversationID)
+				resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
 				continue
 			}
 			minSeq, maxSeq, msgs, err := m.MsgDatabase.GetMsgBySeqsRange(ctx, req.UserID, seq.ConversationID,
 				seq.Begin, seq.End, seq.Num, conversation.MaxSeq)
 			if err != nil {
 				log.ZWarn(ctx, "GetMsgBySeqsRange error", err, "conversationID", seq.ConversationID, "seq", seq)
+				resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
 				continue
 			}
 			var isEnd bool
-			switch req.Order {
-			case sdkws.PullOrder_PullOrderAsc:
-				isEnd = maxSeq <= seq.End
-			case sdkws.PullOrder_PullOrderDesc:
-				isEnd = seq.Begin <= minSeq
+			if totalMsgCount+len(msgs) > maxTotalMessagesPerPullResponse {
+				limit := maxTotalMessagesPerPullResponse - totalMsgCount
+				if limit > 0 {
+					msgs = msgs[:limit]
+					isEnd = false
+				} else {
+					msgs = []*sdkws.MsgData{}
+					isEnd = false
+				}
+				totalMsgCount = maxTotalMessagesPerPullResponse
+			} else {
+				totalMsgCount += len(msgs)
+				switch req.Order {
+				case sdkws.PullOrder_PullOrderAsc:
+					isEnd = maxSeq <= seq.End
+				case sdkws.PullOrder_PullOrderDesc:
+					isEnd = seq.Begin <= minSeq
+				}
 			}
 			if len(msgs) == 0 {
-				log.ZWarn(ctx, "not have msgs", nil, "conversationID", seq.ConversationID, "seq", seq)
-				continue
+				log.ZDebug(ctx, "conversation has no msgs in range", "conversationID", seq.ConversationID, "seq", seq)
 			}
 			resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: msgs, IsEnd: isEnd}
 		} else {
+			if totalMsgCount >= maxTotalMessagesPerPullResponse {
+				resp.NotificationMsgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
+				continue
+			}
 			var seqs []int64
 			for i := seq.Begin; i <= seq.End; i++ {
 				seqs = append(seqs, i)
@@ -65,7 +107,6 @@ func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessag
 			minSeq, maxSeq, notificationMsgs, err := m.MsgDatabase.GetMsgBySeqs(ctx, req.UserID, seq.ConversationID, seqs)
 			if err != nil {
 				log.ZWarn(ctx, "GetMsgBySeqs error", err, "conversationID", seq.ConversationID, "seq", seq)
-
 				continue
 			}
 			var isEnd bool
@@ -77,8 +118,19 @@ func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessag
 			}
 			if len(notificationMsgs) == 0 {
 				log.ZWarn(ctx, "not have notificationMsgs", nil, "conversationID", seq.ConversationID, "seq", seq)
-
 				continue
+			}
+			if totalMsgCount+len(notificationMsgs) > maxTotalMessagesPerPullResponse {
+				limit := maxTotalMessagesPerPullResponse - totalMsgCount
+				if limit > 0 {
+					notificationMsgs = notificationMsgs[:limit]
+				} else {
+					notificationMsgs = []*sdkws.MsgData{}
+				}
+				isEnd = false
+				totalMsgCount = maxTotalMessagesPerPullResponse
+			} else {
+				totalMsgCount += len(notificationMsgs)
 			}
 			resp.NotificationMsgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: notificationMsgs, IsEnd: isEnd}
 		}
