@@ -9,7 +9,8 @@ services:
     image: mongo:7.0
     container_name: mongo
     restart: unless-stopped
-    command: ["--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile"]
+    # For local development on Windows, disable replica set and keyFile due to permission issues
+    command: ["--bind_ip_all"]
     ports:
       - "37017:27017"
     environment:
@@ -126,6 +127,8 @@ services:
 #  environment:
 #    - TZ=Asia/Shanghai
 
+
+# 这里有改动
   openim-admin-front:
     image: ${OPENIM_ADMIN_FRONT_IMAGE}
     container_name: openim-admin-front
