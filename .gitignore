@@ -373,9 +373,3 @@ dist
 
 # config files, may contain sensitive informatio
 config/config.yaml
-
-# local docker data and Windows download metadata
-mongo/data/
-mongo/keyfile/
-*Zone.Identifier
-
