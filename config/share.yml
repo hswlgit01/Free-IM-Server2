@@ -1,0 +1,20 @@
+# IM的安全口令,要和IM保持一致,否则无法通信
+secret: test
+# OpenIM服务的内部管理员用户ID,要与OpenIM服务保持一致,否则无法调通openIM接口
+imAdminUserID: [ imAdmin ]
+
+# Free-IM-Chat API地址（用于查询用户权限，如官方账号保护权限）
+# 本地开发环境使用 http://127.0.0.1:10008
+# 生产环境请修改为实际部署的地址，例如：http://chat-api:10008
+chatAPIURL: "http://127.0.0.1:10008"
+
+# 1: For Android, iOS, Windows, Mac, and web platforms, only one instance can be online at a time
+# 示多端登录相关配置
+multiLogin:
+  # 该策略设置为1，表示对于Android、iOS、Windows、Mac和Web平台，
+  # 每个账号同一时间只能有一个实例在线
+  policy: 1
+  # max num of tokens in one end
+  # 每个端上最多可以拥有30个令牌（Token），
+  # 这是限制同一端的最大令牌数，可能用于限制同时登录设备的数量或会话数量。
+  maxNumOneEnd: 30

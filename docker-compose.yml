@@ -1,0 +1,215 @@
+networks:
+  openim:
+    driver: bridge
+
+
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: mongo
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "37017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: openIM123
+    volumes:
+      - ./mongo/data:/data/db
+#
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  redis:
+    image: "${REDIS_IMAGE}"
+    container_name: redis
+    ports:
+      - "16379:6379"
+    volumes:
+      - "${DATA_DIR}/components/redis/data:/data"
+      - "${DATA_DIR}/components/redis/config/redis.conf:/usr/local/redis/config/redis.conf"
+    environment:
+      TZ: Asia/Shanghai
+    restart: always
+    sysctls:
+      net.core.somaxconn: 1024
+    command: redis-server /usr/local/redis/config/redis.conf --requirepass openIM123 --appendonly yes
+    networks:
+      - openim
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  etcd:
+    image: "${ETCD_IMAGE}"
+    container_name: etcd
+    ports:
+      - "12379:2379"
+      - "12380:2380"
+    environment:
+      - ETCD_NAME=s1
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_CLUSTER=s1=http://0.0.0.0:2380
+      - ETCD_INITIAL_CLUSTER_TOKEN=tkn
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    volumes:
+      - "${DATA_DIR}/components/etcd:/etcd-data"
+    restart: always
+    networks:
+      - openim
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  kafka:
+    image: "${KAFKA_IMAGE}"
+    container_name: kafka
+    # 建议去掉 user: root，改用宿主机权限修复
+    restart: always
+    ports:
+      - "19094:9094"
+    volumes:
+      - "${DATA_DIR}/components/kafka:/bitnami/kafka"
+    environment:
+      TZ: Asia/Shanghai
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      # 必须增加一个固定的集群ID，防止重启后元数据不匹配
+      KAFKA_KRAFT_CLUSTER_ID: "6666666666666666666666"
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - openim
+#
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  minio:
+    image: "${MINIO_IMAGE}"
+    ports:
+      - "10005:9000"
+      - "19090:9090"
+    container_name: minio
+    volumes:
+      - "${DATA_DIR}/components/mnt/data:/data"
+      - "${DATA_DIR}/components/mnt/config:/root/.minio"
+    environment:
+      TZ: Asia/Shanghai
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: openIM123
+    restart: always
+    command: minio server /data --console-address ':9090'
+    networks:
+      - openim
+
+#  openim-web-front:
+#    image: ${OPENIM_WEB_FRONT_IMAGE}
+#    container_name: openim-web-front
+#    restart: always
+#    ports:
+#      - "11001:80"
+#    networks:
+#      - openim
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  # openim-admin-front:
+  #   image: ${OPENIM_ADMIN_FRONT_IMAGE}
+  #   container_name: openim-admin-front
+  #   restart: always
+  #   ports:
+  #     - "11002:80"
+  #   networks:
+  #     - openim
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE}
+    container_name: prometheus
+    restart: always
+    user: root
+    profiles:
+      - m
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/instance-down-rules.yml:/etc/prometheus/instance-down-rules.yml
+      - ${DATA_DIR}/components/prometheus/data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.listen-address=:${PROMETHEUS_PORT}'
+    network_mode: host
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE}
+    container_name: alertmanager
+    restart: always
+    profiles:
+      - m
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - ./config/email.tmpl:/etc/alertmanager/email.tmpl
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--web.listen-address=:${ALERTMANAGER_PORT}'
+    network_mode: host
+#
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  grafana:
+    image: ${GRAFANA_IMAGE}
+    container_name: grafana
+    user: root
+    restart: always
+    profiles:
+      - m
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SESSION_COOKIE_SAMESITE=none
+      - GF_SESSION_COOKIE_SECURE=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SERVER_HTTP_PORT=${GRAFANA_PORT}
+      - GF_SERVER_ROOT_URL=http://admin.forcast.money/grafana
+    volumes:
+      - ${DATA_DIR:-./}/components/grafana:/var/lib/grafana
+    network_mode: host
+
+#  environment:
+#    - TZ=Asia/Shanghai
+
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE}
+    container_name: node-exporter
+    restart: always
+    profiles:
+      - m
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--web.listen-address=:19100'
+    network_mode: host
+#  environment:
+#    - TZ=Asia/Shanghai

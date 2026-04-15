@@ -1,0 +1,66 @@
+rpc:
+  # The IP address where this RPC service registers itself; if left blank, it defaults to the internal network IP
+  # RPC 服务注册的 IP 地址。如果留空，默认使用内部网络 IP。
+  registerIP:
+  # IP address that the RPC service listens on; setting to 0.0.0.0 listens on both internal and external IPs. If left blank, it automatically uses the internal network IP
+  # RPC 服务监听的 IP 地址。设置为 0.0.0.0 时，服务将监听所有网络接口（内部和外部 IP）。如果留空，默认使用内部网络 IP。
+  listenIP: 0.0.0.0
+  # autoSetPorts indicates whether to automatically set the ports
+  # if you use in kubernetes, set it to false
+  # 是否自动为 RPC 服务设置端口。
+  autoSetPorts: true
+  # List of ports that the RPC service listens on; configuring multiple ports will launch multiple instances. These must match the number of configured prometheus ports
+  # It will only take effect when autoSetPorts is set to false.
+  # 手动设置rpc服务端口, 该项仅在 autoSetPorts 设置为 false 时生效，即用户手动指定端口的情况下启用
+  ports:
+
+prometheus:
+  # Enable or disable Prometheus monitoring
+  # 是否开启prometheus监控
+  enable: true
+  # List of ports that Prometheus listens on; these must match the number of rpc.ports to ensure correct monitoring setup
+  # It will only take effect when autoSetPorts is set to false.
+  # Prometheus 监控服务监听的端口列表。这些端口必须与 rpc.ports 中的端口数量匹配，以确保监控设置正确。
+  # 此字段只有在 autoSetPorts 设置为 false 时才生效。
+  ports:
+
+
+# 对象存储相关
+object:
+  # Use MinIO as object storage, or set to "cos", "oss", "kodo", "aws", while also configuring the corresponding settings
+  # 选择使用的对象存储,当前启用的是 MinIO,miniIO的配置在minio.yml内
+  enable: minio
+  cos:
+    bucketURL: 
+    secretID: 
+    secretKey: 
+    sessionToken: 
+    publicRead: false
+  oss:
+    endpoint: 
+    bucket: 
+    bucketURL: 
+    accessKeyID: 
+    accessKeySecret: 
+    sessionToken:
+    publicRead: false
+  kodo:
+    endpoint: 
+    bucket: 
+    bucketURL: 
+    accessKeyID:
+    accessKeySecret:
+    sessionToken: 
+    publicRead: false
+  aws:
+    region: 
+    bucket: 
+    accessKeyID: 
+    secretAccessKey: 
+    sessionToken:
+    publicRead: false
+    # URL格式: "virtual-hosted" 或 "path-style" 测试环境使用 path-style 生产使用 virtual-hosted
+    urlStyle: virtual-hosted
+
+# 最大上传文件大小限制，单位：MB
+maxUploadSize: 50

@@ -1,0 +1,59 @@
+rpc:
+  # The IP address where this RPC service registers itself; if left blank, it defaults to the internal network IP
+  # RPC 服务注册的 IP 地址。如果留空，默认使用内部网络 IP。
+  registerIP:
+  # IP address that the RPC service listens on; setting to 0.0.0.0 listens on both internal and external IPs. If left blank, it automatically uses the internal network IP
+  # RPC 服务监听的 IP 地址。设置为 0.0.0.0 时，服务将监听所有网络接口（内部和外部 IP）。如果留空，默认使用内部网络 IP。
+  listenIP: 0.0.0.0
+  # autoSetPorts indicates whether to automatically set the ports
+  # if you use in kubernetes, set it to false
+  # 是否自动为 RPC 服务设置端口。
+  autoSetPorts: true
+  # List of ports that the RPC service listens on; configuring multiple ports will launch multiple instances. These must match the number of configured prometheus ports
+  # It will only take effect when autoSetPorts is set to false.
+  # 手动设置rpc服务端口, 该项仅在 autoSetPorts 设置为 false 时生效，即用户手动指定端口的情况下启用
+  ports:
+
+
+prometheus:
+  # Enable or disable Prometheus monitoring
+  # 是否开启prometheus监控
+  enable: true
+  # List of ports that Prometheus listens on; these must match the number of rpc.ports to ensure correct monitoring setup
+  # It will only take effect when autoSetPorts is set to false.
+  # Prometheus 监控服务监听的端口列表。这些端口必须与 rpc.ports 中的端口数量匹配，以确保监控设置正确。
+  # 此字段只有在 autoSetPorts 设置为 false 时才生效。
+  ports:
+
+# 下面是手机离线推送相关的服务配置
+# 表示同时允许最多3个工作线程或任务同时运行，控制系统并发处理的数量。
+maxConcurrentWorkers: 3
+#Use geTui for offline push notifications, or choose fcm or jpns; corresponding configuration settings must be specified.
+# 可以设置选择启用哪个推送配置
+enable: getui
+getui:
+  pushUrl: https://restapi.getui.com/v2/u7XipjV3Dt6qDLMhwRE8U2
+  masterSecret: EasNjZNZO269akZFPbgyb9
+  appKey: K3QdSzBF3D7k8a1o3JSNL2
+  intent: intent:#Intent;launchFlags=0x14000000;package=com.freechat.app;component=com.freechat.app/.MainActivity;end
+  channelID: default_channel
+  channelName: 默认通知
+fcm:
+  # Prioritize using file paths. If the file path is empty, use URL
+  filePath:   # File path is concatenated with the parameters passed in through - c(`mage` default pass in `config/`) and filePath.
+  authURL:   #  Must start with https or http.
+jpush:
+  appKey:
+  masterSecret:
+  pushURL:
+  pushIntent:
+
+# iOS system push sound and badge count
+# ios系统的推送配置
+iosPush:
+  pushSound: xxx
+  badgeCount: true
+  production: false
+
+# 表示是否启用完整用户缓存，用于提高推送服务的性能或减少数据库访问频率。
+fullUserCache: true

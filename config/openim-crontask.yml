@@ -1,0 +1,8 @@
+# 每日2点执行定时任务
+cronExecuteTime: 0 2 * * *
+# 聊天记录的保留周期,天为单位
+retainChatRecords: 365
+# 说明文件（如聊天中上传的附件）超过180天后将被视为过期。
+fileExpireTime: 180
+# 这是一个数组，指定了需要删除的对象类型。  包括图片、文件、语音、视频、视频快照以及 SDK 日志等。
+deleteObjectType: ["msg-picture","msg-file", "msg-voice","msg-video","msg-video-snapshot","sdklog"]
