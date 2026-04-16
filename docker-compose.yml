@@ -9,8 +9,7 @@ services:
     image: mongo:7.0
     container_name: mongo
     restart: unless-stopped
-    # For local development on Windows, disable replica set and keyFile due to permission issues
-    command: ["--bind_ip_all"]
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "37017:27017"
     environment:
@@ -18,8 +17,6 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: openIM123
     volumes:
       - ./mongo/data:/data/db
-      - ./mongo/init/init.js:/docker-entrypoint-initdb.d/init.js:ro
-      - ./mongo/keyfile:/etc/mongo-keyfile:ro
 #
 #  environment:
 #    - TZ=Asia/Shanghai
@@ -127,16 +124,14 @@ services:
 #  environment:
 #    - TZ=Asia/Shanghai
 
-
-# 这里有改动
-  openim-admin-front:
-    image: ${OPENIM_ADMIN_FRONT_IMAGE}
-    container_name: openim-admin-front
-    restart: always
-    ports:
-      - "11002:80"
-    networks:
-      - openim
+  # openim-admin-front:
+  #   image: ${OPENIM_ADMIN_FRONT_IMAGE}
+  #   container_name: openim-admin-front
+  #   restart: always
+  #   ports:
+  #     - "11002:80"
+  #   networks:
+  #     - openim
 
 #  environment:
 #    - TZ=Asia/Shanghai
