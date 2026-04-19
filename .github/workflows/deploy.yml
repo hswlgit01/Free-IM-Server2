@@ -45,15 +45,9 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-            docker load < /root/deploy/free-im-server.tar.gz  # 加载镜像
-            rm -f /root/deploy/free-im-server.tar.gz         # 清理压缩包
-            docker stop free-im-server 2>/dev/null || true    # 停止旧容器
-            docker rm free-im-server 2>/dev/null || true      # 删除旧容器
-            docker run -d \                                   # 运行容器 -d 分离模式  后台运行
-              --name free-im-server \                         # 容器名称
-              --network host \                                # 使用宿主机网络
-              --restart unless-stopped \                      # 自动重启策略
-              -v /data/app/server/config:/app/config \        # 将服务器上的 /data/app/server/config目录映射到容器内的 /app/config用于配置文件持久化
-              -v /data/logs/server:/app/logs \                # 将服务器上的 /data/logs/server 目录映射到容器内的 /app/logs用于日志持久化
-              free-im-server:latest                           # latest最新版本运行容器
-            docker ps | grep free-im-server                   # 验证运行状态
+            docker load < /root/deploy/free-im-server.tar.gz
+            rm -f /root/deploy/free-im-server.tar.gz
+            docker stop free-im-server 2>/dev/null || true
+            docker rm free-im-server 2>/dev/null || true
+            docker run -d --name free-im-server --network host --restart unless-stopped -v /data/app/server/config:/app/config -v /data/logs/server:/app/logs free-im-server:latest
+            docker ps | grep free-im-server
