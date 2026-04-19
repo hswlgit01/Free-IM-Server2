@@ -1,5 +1,5 @@
 # ============================================
-# Free-IM-Server CI/CD 流水线配置
+# free-im-server CI/CD 流水线配置
 # 功能：代码推送后自动构建镜像并部署到服务器
 # ============================================
 
@@ -21,11 +21,11 @@ jobs:
 
       # ----- 2. 构建镜像 -----
       - name: Build Docker image
-        run: docker build -t Free-IM-Server:latest .
+        run: docker build -t free-im-server:latest .
 
       # ----- 3. 压缩镜像（方便传输）-----
       - name: Save image to file
-        run: docker save Free-IM-Server:latest | gzip > Free-IM-Server.tar.gz
+        run: docker save free-im-server:latest | gzip > free-im-server.tar.gz
 
       # ----- 4. 上传到服务器 -----
       - name: Copy to server
@@ -34,7 +34,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          source: "Free-IM-Server.tar.gz"
+          source: "free-im-server.tar.gz"
           target: "/root/deploy/"
 
       # ----- 5. 服务器部署 -----
@@ -45,15 +45,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-            docker load < /root/deploy/Free-IM-Server.tar.gz  # 加载镜像
-            rm -f /root/deploy/Free-IM-Server.tar.gz         # 清理压缩包
-            docker stop Free-IM-Server 2>/dev/null || true    # 停止旧容器
-            docker rm Free-IM-Server 2>/dev/null || true      # 删除旧容器
+            docker load < /root/deploy/free-im-server.tar.gz  # 加载镜像
+            rm -f /root/deploy/free-im-server.tar.gz         # 清理压缩包
+            docker stop free-im-server 2>/dev/null || true    # 停止旧容器
+            docker rm free-im-server 2>/dev/null || true      # 删除旧容器
             docker run -d \                                   # 运行容器 -d 分离模式  后台运行
-              --name Free-IM-Server \                         # 容器名称
+              --name free-im-server \                         # 容器名称
               --network host \                                # 使用宿主机网络
               --restart unless-stopped \                      # 自动重启策略
               -v /data/app/server/config:/app/config \        # 将服务器上的 /data/app/server/config目录映射到容器内的 /app/config用于配置文件持久化
               -v /data/logs/server:/app/logs \                # 将服务器上的 /data/logs/server 目录映射到容器内的 /app/logs用于日志持久化
-              Free-IM-Server:latest                           # latest最新版本运行容器
-            docker ps | grep Free-IM-Server                   # 验证运行状态
+              free-im-server:latest                           # latest最新版本运行容器
+            docker ps | grep free-im-server                   # 验证运行状态
