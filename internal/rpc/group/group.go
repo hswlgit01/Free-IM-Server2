@@ -1542,6 +1542,10 @@ func (g *groupServer) DismissGroup(ctx context.Context, req *pbgroup.DismissGrou
 	if !req.DeleteMember && group.Status == constant.GroupStatusDismissed {
 		return nil, servererrs.ErrDismissedAlready.WrapMsg("group status is dismissed")
 	}
+	membersID, err := g.db.FindGroupMemberUserID(ctx, group.GroupID)
+	if err != nil {
+		return nil, err
+	}
 	if err := g.db.DismissGroup(ctx, req.GroupID, req.DeleteMember); err != nil {
 		return nil, err
 	}
@@ -1559,9 +1563,10 @@ func (g *groupServer) DismissGroup(ctx context.Context, req *pbgroup.DismissGrou
 		}
 		g.notification.GroupDismissedNotification(ctx, tips, req.SendMessage)
 	}
-	membersID, err := g.db.FindGroupMemberUserID(ctx, group.GroupID)
-	if err != nil {
-		return nil, err
+	if shouldCleanupDismissedGroupMembersAfterNotification(req) {
+		if err := g.db.DismissGroup(ctx, req.GroupID, true); err != nil {
+			return nil, err
+		}
 	}
 	cbReq := &callbackstruct.CallbackDisMissGroupReq{
 		GroupID:   req.GroupID,
@@ -1579,6 +1584,10 @@ func (g *groupServer) DismissGroup(ctx context.Context, req *pbgroup.DismissGrou
 		}
 	}
 	return &pbgroup.DismissGroupResp{}, nil
+}
+
+func shouldCleanupDismissedGroupMembersAfterNotification(req *pbgroup.DismissGroupReq) bool {
+	return req != nil && !req.DeleteMember
 }
 
 func (g *groupServer) MuteGroupMember(ctx context.Context, req *pbgroup.MuteGroupMemberReq) (*pbgroup.MuteGroupMemberResp, error) {
