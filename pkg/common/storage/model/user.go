@@ -28,7 +28,7 @@ type User struct {
 	CanSendFreeMsg   int32     `bson:"can_send_free_msg"` // 新增：0=普通用户需好友验证，1=可跳过消息验证
 	CreateTime       time.Time `bson:"create_time"`
 	OrgId            string    `bson:"org_id"`   //组织ID
-	OrgRole          string    `bson:"org_role"` //四种枚举 - "SuperAdmin", "BackendAdmin", "GroupManager", "Normal"
+	OrgRole          string    `bson:"org_role"` // 五种枚举 - "SuperAdmin", "BackendAdmin", "GroupManager", "TermManager"(团队长), "Normal"。前四种在单聊时可越过好友校验，参见 internal/rpc/msg/verify.go:isPrivilegedOrgRole
 	AESKey           string    `bson:"aes_key"`
 }
 

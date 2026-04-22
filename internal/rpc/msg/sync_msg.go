@@ -16,6 +16,7 @@ package msg
 
 import (
 	"context"
+	"strings"
 
 	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
 	"github.com/openimsdk/open-im-server/v3/pkg/msgprocessor"
@@ -177,6 +178,9 @@ func (m *msgServer) GetMaxSeq(ctx context.Context, req *sdkws.GetMaxSeqReq) (*sd
 	if err != nil {
 		return nil, err
 	}
+	// Drop dismissed-group conversations so a client clearing its cache and re-syncing
+	// cannot re-hydrate history from a group that was disbanded.
+	conversationIDs = m.filterDismissedGroupConversationIDs(ctx, conversationIDs)
 	for _, conversationID := range conversationIDs {
 		conversationIDs = append(conversationIDs, conversationutil.GetNotificationConversationIDByConversationID(conversationID))
 	}
@@ -196,6 +200,45 @@ func (m *msgServer) GetMaxSeq(ctx context.Context, req *sdkws.GetMaxSeqReq) (*sd
 	resp := new(sdkws.GetMaxSeqResp)
 	resp.MaxSeqs = maxSeqs
 	return resp, nil
+}
+
+// filterDismissedGroupConversationIDs removes `sg_<groupID>` entries whose group has been
+// dismissed. Non-group conversation IDs pass through untouched. Errors fetching group info
+// fail open (we keep the ID) to avoid hiding conversations on a transient cache miss.
+func (m *msgServer) filterDismissedGroupConversationIDs(ctx context.Context, conversationIDs []string) []string {
+	groupIDs := make([]string, 0)
+	for _, cid := range conversationIDs {
+		if strings.HasPrefix(cid, "sg_") {
+			groupIDs = append(groupIDs, strings.TrimPrefix(cid, "sg_"))
+		}
+	}
+	if len(groupIDs) == 0 {
+		return conversationIDs
+	}
+	groupInfos, err := m.GroupLocalCache.GetGroupInfos(ctx, groupIDs)
+	if err != nil {
+		log.ZWarn(ctx, "GetGroupInfos failed while filtering dismissed groups; falling back to unfiltered list", err, "groupIDs", groupIDs)
+		return conversationIDs
+	}
+	dismissed := make(map[string]struct{}, len(groupInfos))
+	for _, g := range groupInfos {
+		if g != nil && g.Status == constant.GroupStatusDismissed {
+			dismissed[g.GroupID] = struct{}{}
+		}
+	}
+	if len(dismissed) == 0 {
+		return conversationIDs
+	}
+	filtered := make([]string, 0, len(conversationIDs))
+	for _, cid := range conversationIDs {
+		if strings.HasPrefix(cid, "sg_") {
+			if _, ok := dismissed[strings.TrimPrefix(cid, "sg_")]; ok {
+				continue
+			}
+		}
+		filtered = append(filtered, cid)
+	}
+	return filtered
 }
 
 func (m *msgServer) SearchMessage(ctx context.Context, req *msg.SearchMessageReq) (resp *msg.SearchMessageResp, err error) {

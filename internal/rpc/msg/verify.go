@@ -93,6 +93,12 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) || u.CanSendFreeMsg == constant.MessageFreeLevel || recv.CanSendFreeMsg == constant.MessageFreeLevel {
 			return nil
 		}
+		// Admin / team-leader org roles bypass friend verification: they may DM anyone
+		// directly, and anyone may reply to them (recv-side role also exempts). OrgRole
+		// values mirror chat svc organization_user.go.
+		if isPrivilegedOrgRole(u.OrgRole) || isPrivilegedOrgRole(recv.OrgRole) {
+			return nil
+		}
 		black, err := m.FriendLocalCache.IsBlack(ctx, data.MsgData.SendID, data.MsgData.RecvID)
 		if err != nil {
 			return err
@@ -340,6 +346,19 @@ func (m *msgServer) checkOrgContentSendPermission(ctx context.Context, msgData *
 func GetMsgID(sendID string) string {
 	t := timeutil.GetCurrentTimeFormatted()
 	return encrypt.Md5(t + "-" + sendID + "-" + strconv.Itoa(rand.Int()))
+}
+
+// isPrivilegedOrgRole reports whether an OrgRole should bypass the
+// stranger/friend check when sending a single-chat message. Roles kept in sync
+// with chat svc `organization_user.go`: SuperAdmin, BackendAdmin, GroupManager,
+// TermManager (团队长), Normal. "Normal" and unset values are NOT privileged.
+func isPrivilegedOrgRole(role string) bool {
+	switch role {
+	case "SuperAdmin", "BackendAdmin", "GroupManager", "TermManager":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *msgServer) modifyMessageByUserMessageReceiveOpt(ctx context.Context, userID, conversationID string, sessionType int, pb *msg.SendMsgReq) (bool, error) {

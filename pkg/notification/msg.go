@@ -74,7 +74,11 @@ func newContentTypeConf(conf *config.Notification) map[int32]config.Notification
 		constant.ConversationUnreadNotification:      conf.ConversationChanged,
 		constant.ConversationPrivateChatNotification: conf.ConversationSetPrivate,
 		// msg
-		constant.MsgRevokeNotification:  {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationNoMsg},
+		// ReliableNotificationMsg: persist the revoke notification in the message queue so
+		// offline/stale clients still receive it on next incremental sync. With NoMsg, a user
+		// who had already pulled the original message would never see the revoke without
+		// wiping the local cache.
+		constant.MsgRevokeNotification:  {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationMsg},
 		constant.HasReadReceipt:         {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationNoMsg},
 		constant.DeleteMsgsNotification: {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationNoMsg},
 	}
