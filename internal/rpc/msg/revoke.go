@@ -28,7 +28,6 @@ import (
 	"github.com/openimsdk/open-im-server/v3/protocol/sdkws"
 	"github.com/openimsdk/tools/errs"
 	"github.com/openimsdk/tools/log"
-	"github.com/openimsdk/tools/mcontext"
 	"github.com/openimsdk/tools/utils/datautil"
 )
 
@@ -106,21 +105,7 @@ func (m *msgServer) RevokeMsg(ctx context.Context, req *msg.RevokeMsgReq) (*msg.
 	if err != nil {
 		return nil, err
 	}
-	revokerUserID := mcontext.GetOpUserID(ctx)
-	var flag bool
-
-	if len(m.config.Share.IMAdminUserID) > 0 {
-		flag = datautil.Contain(revokerUserID, m.config.Share.IMAdminUserID...)
-	}
-	tips := sdkws.RevokeMsgTips{
-		RevokerUserID:  revokerUserID,
-		ClientMsgID:    msgs[0].ClientMsgID,
-		RevokeTime:     now,
-		Seq:            req.Seq,
-		SesstionType:   msgs[0].SessionType,
-		ConversationID: req.ConversationID,
-		IsAdminRevoke:  flag,
-	}
+	tips := buildRevokeMsgTips(req.UserID, req.ConversationID, msgs[0], req.Seq, now, m.config.Share.IMAdminUserID)
 	var recvID string
 	if msgs[0].SessionType == constant.ReadGroupChatType {
 		recvID = msgs[0].GroupID
@@ -130,4 +115,16 @@ func (m *msgServer) RevokeMsg(ctx context.Context, req *msg.RevokeMsgReq) (*msg.
 	m.notificationSender.NotificationWithSessionType(ctx, req.UserID, recvID, constant.MsgRevokeNotification, msgs[0].SessionType, &tips)
 	m.webhookAfterRevokeMsg(ctx, &m.config.WebhooksConfig.AfterRevokeMsg, req)
 	return &msg.RevokeMsgResp{}, nil
+}
+
+func buildRevokeMsgTips(revokerUserID, conversationID string, source *sdkws.MsgData, seq, revokeTime int64, adminUserIDs []string) sdkws.RevokeMsgTips {
+	return sdkws.RevokeMsgTips{
+		RevokerUserID:  revokerUserID,
+		ClientMsgID:    source.ClientMsgID,
+		RevokeTime:     revokeTime,
+		Seq:            seq,
+		SesstionType:   source.SessionType,
+		ConversationID: conversationID,
+		IsAdminRevoke:  len(adminUserIDs) > 0 && datautil.Contain(revokerUserID, adminUserIDs...),
+	}
 }

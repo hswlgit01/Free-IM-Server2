@@ -41,6 +41,7 @@ import (
 	"github.com/openimsdk/open-im-server/v3/protocol/sdkws"
 	"github.com/openimsdk/tools/discovery"
 	"github.com/openimsdk/tools/errs"
+	"github.com/openimsdk/tools/log"
 	"github.com/openimsdk/tools/mcontext"
 	"github.com/openimsdk/tools/utils/datautil"
 	"google.golang.org/grpc"
@@ -224,15 +225,39 @@ func (s *friendServer) ImportFriends(ctx context.Context, req *relation.ImportFr
 		return nil, err
 	}
 
+	type friendImportState struct {
+		ownerHasFriend bool
+		friendHasOwner bool
+	}
+	importStates := make(map[string]friendImportState, len(req.FriendUserIDs))
+	for _, userID := range req.FriendUserIDs {
+		ownerHasFriend, friendHasOwner, err := s.db.CheckIn(ctx, req.OwnerUserID, userID)
+		if err != nil {
+			return nil, err
+		}
+		importStates[userID] = friendImportState{
+			ownerHasFriend: ownerHasFriend,
+			friendHasOwner: friendHasOwner,
+		}
+	}
+
 	if err := s.db.BecomeFriends(ctx, req.OwnerUserID, req.FriendUserIDs, constant.BecomeFriendByImport); err != nil {
 		return nil, err
 	}
+	operationID := mcontext.GetOperationID(ctx)
+	opUserID := req.OwnerUserID
 	for _, userID := range req.FriendUserIDs {
-		s.notificationSender.FriendApplicationAgreedNotification(ctx, &relation.RespondFriendApplyReq{
-			FromUserID:   req.OwnerUserID,
-			ToUserID:     userID,
-			HandleResult: constant.FriendResponseAgree,
-		})
+		state := importStates[userID]
+		if !state.ownerHasFriend {
+			if err := s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, userID, req.OwnerUserID); err != nil {
+				log.ZWarn(ctx, "send import friend added notification to owner failed", err, "ownerUserID", req.OwnerUserID, "friendUserID", userID)
+			}
+		}
+		if !state.friendHasOwner {
+			if err := s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.OwnerUserID, userID); err != nil {
+				log.ZWarn(ctx, "send import friend added notification to friend failed", err, "ownerUserID", req.OwnerUserID, "friendUserID", userID)
+			}
+		}
 	}
 
 	s.webhookAfterImportFriends(ctx, &s.config.WebhooksConfig.AfterImportFriends, req)
