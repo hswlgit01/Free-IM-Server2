@@ -74,6 +74,13 @@ func GetOptionsByNotification(cfg NotificationConfig, sendMessage *bool) msgproc
 	case constant.UnreliableNotification:
 	case constant.ReliableNotificationNoMsg:
 		opts = msgprocessor.WithOptions(opts, msgprocessor.WithHistory(true), msgprocessor.WithPersistent())
+	case constant.ReliableNotificationMsg:
+		// dawn 2026-04-27 修撤回不下发：原版 switch 漏掉这条 case，导致 ReliabilityLevel=3
+		// 的通知（撤回 MsgRevokeNotification）拿不到 WithHistory/WithPersistent，
+		// 在 categorizeMessageLists 里被分到 notStorageNotificationList（不存历史、
+		// 不持久化），接收方 SDK 拿不到该撤回通知，对端永远看不到 "xxx 撤回了一条消息"。
+		// 行为上至少要和 NoMsg 一致 —— 存历史 + 持久化，让接收方 sync 时能拿到。
+		opts = msgprocessor.WithOptions(opts, msgprocessor.WithHistory(true), msgprocessor.WithPersistent())
 	}
 	opts = msgprocessor.WithOptions(opts, msgprocessor.WithSendMsg(cfg.IsSendMsg))
 
