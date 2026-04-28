@@ -78,17 +78,14 @@ func newContentTypeConf(conf *config.Notification) map[int32]config.Notification
 		// offline/stale clients still receive it on next incremental sync. With NoMsg, a user
 		// who had already pulled the original message would never see the revoke without
 		// wiping the local cache.
-		// dawn 2026-04-28 IsSendMsg 改成 true：
-		//   online_history_msg_handler.go:219 用 `IsSendMsg && ShouldDeliverSystemMsgToChat`
-		//   双重 gate 来决定要不要把这些系统通知 clone 成聊天消息丢进 storageMsgList。
-		//   ShouldDeliverSystemMsgToChat 已经把这三类显式列为"始终下发"。但 IsSendMsg=false
-		//   让 AND 短路，导致接收方 SDK 永远从 chat conversation 路径拿不到撤回/已读/删除
-		//   通知，对端永远看不到 "xxx 撤回了一条消息"、已读小勾不更新。改成 true 让 AND
-		//   通过，从而走 storageMsgList 路径正常 dispatch 到 SDK 的 onNewRecvMessageRevoked
-		//   / onRecvC2CReadReceipt 等回调。
-		constant.MsgRevokeNotification:  {IsSendMsg: true, ReliabilityLevel: constant.ReliableNotificationMsg},
-		constant.HasReadReceipt:         {IsSendMsg: true, ReliabilityLevel: constant.ReliableNotificationNoMsg},
-		constant.DeleteMsgsNotification: {IsSendMsg: true, ReliabilityLevel: constant.ReliableNotificationNoMsg},
+		// dawn 2026-04-28 codex review 反馈：之前一度把这三个改成 IsSendMsg=true 是错的——
+		//   会让自同步（sendID==recvID）的已读/删除被 categorizeMessageLists 克隆到
+		//   "si_user_user" 伪自会话；而且根本问题不在这里，在于 send.go 的 SysMsgType
+		//   空昵称过滤直接把这些通知在落 MQ 前就 drop 了。回退成 false，真正的修复
+		//   去 send.go 给这三类通知放行。
+		constant.MsgRevokeNotification:  {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationMsg},
+		constant.HasReadReceipt:         {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationNoMsg},
+		constant.DeleteMsgsNotification: {IsSendMsg: false, ReliabilityLevel: constant.ReliableNotificationNoMsg},
 	}
 }
 

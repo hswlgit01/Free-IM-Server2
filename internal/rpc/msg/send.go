@@ -73,11 +73,22 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 		}()
 
 		// 系统消息（单聊/群聊）无有效发送者昵称时不下发，避免客户端出现 null:[otherMessage]
+		// dawn 2026-04-28 给撤回/已读/删除三类系统通知放行：它们走 NotificationSender.send
+		// 时不会注入 SenderNickname（调用方没传 WithRpcGetUserName），但接收方 SDK 依靠
+		// notificationElem.detail 自己解析 revokerNickname 等字段，并不依赖外层 SenderNickname。
+		// 之前这条过滤会把这些合法的系统通知一并 drop，导致对端永远看不到 "xxx 撤回了一条消息"、
+		// 已读小勾不更新。bypass 这三类即可。
 		if req.MsgData.MsgFrom == constant.SysMsgType {
-			nick := strings.TrimSpace(req.MsgData.SenderNickname)
-			if nick == "" || strings.EqualFold(nick, "null") || strings.EqualFold(nick, "nil") {
-				log.ZDebug(ctx, "skip send: sys msg without valid sender nickname", "sessionType", req.MsgData.SessionType, "contentType", req.MsgData.ContentType, "sendID", req.MsgData.SendID)
-				return
+			ct := req.MsgData.ContentType
+			needsNickname := ct != constant.MsgRevokeNotification &&
+				ct != constant.HasReadReceipt &&
+				ct != constant.DeleteMsgsNotification
+			if needsNickname {
+				nick := strings.TrimSpace(req.MsgData.SenderNickname)
+				if nick == "" || strings.EqualFold(nick, "null") || strings.EqualFold(nick, "nil") {
+					log.ZDebug(ctx, "skip send: sys msg without valid sender nickname", "sessionType", req.MsgData.SessionType, "contentType", req.MsgData.ContentType, "sendID", req.MsgData.SendID)
+					return
+				}
 			}
 		}
 
