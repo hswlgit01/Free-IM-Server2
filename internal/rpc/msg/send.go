@@ -73,17 +73,26 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 		}()
 
 		// 系统消息（单聊/群聊）无有效发送者昵称时不下发，避免客户端出现 null:[otherMessage]
-		// dawn 2026-04-28 给撤回/已读/删除三类系统通知放行：它们走 NotificationSender.send
-		// 时不会注入 SenderNickname（调用方没传 WithRpcGetUserName），但接收方 SDK 依靠
-		// notificationElem.detail 自己解析 revokerNickname 等字段，并不依赖外层 SenderNickname。
-		// 之前这条过滤会把这些合法的系统通知一并 drop，导致对端永远看不到 "xxx 撤回了一条消息"、
-		// 已读小勾不更新。bypass 这三类即可。
+		// dawn 2026-04-27 修邀请码注册后好友列表不刷新：
+		//   测试反馈"邀请码注册后默认好友没出现，要在聊天窗口跳出来"。链路追下来，
+		//   OpenIM ImportFriends -> BecomeFriends 已经双向写好友表，DB 是对的；问题在
+		//   FriendAddedNotification(1204) 走到这里被 drop —— relation/notification.go
+		//   里 f.Notification(...) 没传 WithRpcGetUserName()，到 NotificationSender.send
+		//   时 SenderNickname 一直为空，被这个过滤一刀切。客户端 SDK 永远收不到
+		//   "新增好友" 事件，UI 不刷新，外观就是"没加上"。
+		//
+		//   2026-04-28 之前只对撤回/已读/删除三个 contentType 加白名单，但同样的坑还有
+		//   FriendAddedNotification / FriendApplicationApprovedNotification /
+		//   GroupCreated / MemberInvited / MemberQuit ... 一大票（grep notification.go
+		//   就能看到 30+ 处 f.Notification / g.Notification 都没带 WithRpcGetUserName）。
+		//   不能一个个补，改成按 contentType 区间判断：所有 [NotificationBegin, NotificationEnd]
+		//   范围内的协议通知一律放行 —— 这些消息接收方 SDK 都是从 notificationElem.Detail
+		//   里自己解析 tips（FriendAddedTips / GroupCreatedTips 等），从不依赖外层
+		//   SenderNickname；nickname filter 只对真正的用户层系统消息（区间外）有意义。
 		if req.MsgData.MsgFrom == constant.SysMsgType {
 			ct := req.MsgData.ContentType
-			needsNickname := ct != constant.MsgRevokeNotification &&
-				ct != constant.HasReadReceipt &&
-				ct != constant.DeleteMsgsNotification
-			if needsNickname {
+			isProtocolNotification := ct >= constant.NotificationBegin && ct <= constant.NotificationEnd
+			if !isProtocolNotification {
 				nick := strings.TrimSpace(req.MsgData.SenderNickname)
 				if nick == "" || strings.EqualFold(nick, "null") || strings.EqualFold(nick, "nil") {
 					log.ZDebug(ctx, "skip send: sys msg without valid sender nickname", "sessionType", req.MsgData.SessionType, "contentType", req.MsgData.ContentType, "sendID", req.MsgData.SendID)
