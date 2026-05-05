@@ -237,7 +237,7 @@ func newGinRouter(ctx context.Context, client discovery.Conn, cfg *Config) (*gin
 	{
 		msgGroup := r.Group("/msg")
 		msgGroup.POST("/newest_seq", m.GetSeq)
-		//msgGroup.POST("/search_msg", m.SearchMsg)
+		msgGroup.POST("/search_msg", m.SearchMsg) // dawn 2026-05-05 修复后台聊天记录查询：启用消息搜索路由供 CMS 代理调用。
 		msgGroup.POST("/send_msg", m.SendMessage)
 		msgGroup.POST("/send_business_notification", m.SendBusinessNotification)
 		msgGroup.POST("/pull_msg_by_seq", m.PullMsgBySeqs)
