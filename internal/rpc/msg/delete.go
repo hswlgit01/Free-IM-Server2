@@ -70,12 +70,16 @@ func (m *msgServer) DeleteMsgs(ctx context.Context, req *msg.DeleteMsgsReq) (*ms
 		return nil, err
 	}
 	isSyncSelf, isSyncOther := m.validateDeleteSyncOpt(req.DeleteSyncOpt)
-	if isSyncOther {
-		if err := m.MsgDatabase.DeleteMsgsPhysicalBySeqs(ctx, req.ConversationID, req.Seqs); err != nil {
+	var conv *conversation.Conversation
+	if isSyncSelf || isSyncOther {
+		var err error
+		conv, err = m.conversationClient.GetConversationsByConversationID(ctx, req.ConversationID)
+		if err != nil {
 			return nil, err
 		}
-		conv, err := m.conversationClient.GetConversationsByConversationID(ctx, req.ConversationID)
-		if err != nil {
+	}
+	if isSyncOther {
+		if err := m.MsgDatabase.DeleteMsgsPhysicalBySeqs(ctx, req.ConversationID, req.Seqs); err != nil {
 			return nil, err
 		}
 		tips := &sdkws.DeleteMsgsTips{UserID: req.UserID, ConversationID: req.ConversationID, Seqs: req.Seqs}
@@ -86,8 +90,10 @@ func (m *msgServer) DeleteMsgs(ctx context.Context, req *msg.DeleteMsgsReq) (*ms
 			return nil, err
 		}
 		if isSyncSelf {
+			// dawn 2026-05-06 修复后台删客户端无效：用户侧删除仍按原会话下发通知，避免客户端收到 user->user 自会话通知后不处理原聊天记录。
 			tips := &sdkws.DeleteMsgsTips{UserID: req.UserID, ConversationID: req.ConversationID, Seqs: req.Seqs}
-			m.notificationSender.NotificationWithSessionType(ctx, req.UserID, req.UserID, constant.DeleteMsgsNotification, constant.SingleChatType, tips)
+			m.notificationSender.NotificationWithSessionType(ctx, req.UserID, m.conversationAndGetRecvID(conv, req.UserID),
+				constant.DeleteMsgsNotification, conv.ConversationType, tips)
 		}
 	}
 	return &msg.DeleteMsgsResp{}, nil
