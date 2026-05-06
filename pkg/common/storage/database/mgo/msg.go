@@ -378,7 +378,8 @@ type searchMessageIndex struct {
 func (m *MsgMgo) searchMessageIndex(ctx context.Context, filter any, nextID primitive.ObjectID, limit int) ([]searchMessageIndex, error) {
 	var pipeline bson.A
 	if !nextID.IsZero() {
-		pipeline = append(pipeline, bson.M{"$match": bson.M{"_id": bson.M{"$gt": nextID}}})
+		// dawn 2026-05-06 修复后台消息记录查不到新消息：消息搜索从最新文档向前分页，避免第一页只返回旧记录。
+		pipeline = append(pipeline, bson.M{"$match": bson.M{"_id": bson.M{"$lt": nextID}}})
 	}
 	coarseFilter := bson.M{
 		"$or": bson.A{
@@ -391,7 +392,8 @@ func (m *MsgMgo) searchMessageIndex(ctx context.Context, filter any, nextID prim
 		},
 	}
 	pipeline = append(pipeline,
-		bson.M{"$sort": bson.M{"_id": 1}},
+		// dawn 2026-05-06 修复后台消息记录查不到新消息：优先扫描最新消息文档。
+		bson.M{"$sort": bson.M{"_id": -1}},
 		bson.M{"$match": coarseFilter},
 		bson.M{"$match": filter},
 		bson.M{"$limit": limit},
@@ -432,7 +434,7 @@ func (m *MsgMgo) searchMessageIndex(ctx context.Context, filter any, nextID prim
 				"index": bson.M{"$push": "$msgs._search_temp_index"},
 			},
 		},
-		bson.M{"$sort": bson.M{"_id": 1}},
+		bson.M{"$sort": bson.M{"_id": -1}},
 	)
 	return mongoutil.Aggregate[searchMessageIndex](ctx, m.coll, pipeline)
 }
@@ -491,7 +493,9 @@ func (m *MsgMgo) searchMessage(ctx context.Context, req *msg.SearchMessageReq) (
 		}
 		for _, r := range res {
 			var dataIndex []int64
-			for _, index := range r.Index {
+			// dawn 2026-05-06 修复后台消息记录查不到新消息：同一文档内按 seq 倒序返回最新消息。
+			for j := len(r.Index) - 1; j >= 0; j-- {
+				index := r.Index[j]
 				if push > 0 && count >= skip {
 					dataIndex = append(dataIndex, index)
 					push--
