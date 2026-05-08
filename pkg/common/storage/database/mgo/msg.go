@@ -461,61 +461,97 @@ func (m *MsgMgo) searchMessage(ctx context.Context, req *msg.SearchMessageReq) (
 		if err != nil {
 			return 0, nil, errs.ErrArgs.WrapMsg("invalid sendTime", "req", req.SendTime, "format", time.DateOnly, "cause", err.Error())
 		}
-		filter["$and"] = bson.A{
-			bson.M{"msgs.msg.send_time": bson.M{
-				"$gte": sendTime.UnixMilli(),
-			}},
-			bson.M{
-				"msgs.msg.send_time": bson.M{
-					"$lt": sendTime.Add(time.Hour * 24).UnixMilli(),
-				},
-			},
+		filter["msgs.msg.send_time"] = bson.M{
+			"$gte": sendTime.UnixMilli(),
+			"$lt":  sendTime.Add(time.Hour * 24).UnixMilli(),
 		}
 	}
 
 	var (
-		nextID    primitive.ObjectID
-		count     int
-		dataRange []searchMessageIndex
-		skip      = int((req.Pagination.GetPageNumber() - 1) * req.Pagination.GetShowNumber())
+		pageNumber = req.Pagination.GetPageNumber()
+		showNumber = req.Pagination.GetShowNumber()
 	)
-	_, _ = dataRange, skip
-	const maxDoc = 50
-	data := make([]searchMessageIndex, 0, req.Pagination.GetShowNumber())
-	push := cap(data)
-	for i := 0; ; i++ {
-		res, err := m.searchMessageIndex(ctx, filter, nextID, maxDoc)
-		if err != nil {
-			return 0, nil, err
-		}
-		if len(res) > 0 {
-			nextID = res[len(res)-1].ID
-		}
-		for _, r := range res {
-			var dataIndex []int64
-			// dawn 2026-05-06 修复后台消息记录查不到新消息：同一文档内按 seq 倒序返回最新消息。
-			for j := len(r.Index) - 1; j >= 0; j-- {
-				index := r.Index[j]
-				if push > 0 && count >= skip {
-					dataIndex = append(dataIndex, index)
-					push--
-				}
-				count++
-			}
-			if len(dataIndex) > 0 {
-				data = append(data, searchMessageIndex{
-					ID:    r.ID,
-					Index: dataIndex,
-				})
-			}
-		}
-		if push <= 0 {
-			push--
-		}
-		if len(res) < maxDoc || push < -10 {
-			return int64(count), data, nil
-		}
+	if pageNumber < 1 {
+		pageNumber = 1
 	}
+	if showNumber < 1 {
+		showNumber = 10
+	}
+	skip := int((pageNumber - 1) * showNumber)
+
+	coarseFilter := bson.M{
+		"$or": bson.A{
+			bson.M{"doc_id": primitive.Regex{Pattern: "^sg_"}},
+			bson.M{"doc_id": primitive.Regex{Pattern: "^si_"}},
+		},
+	}
+	type searchMessageFacet struct {
+		Total []struct {
+			Count int64 `bson:"count"`
+		} `bson:"total"`
+		Data []searchMessageIndex `bson:"data"`
+	}
+	pipeline := bson.A{
+		bson.M{"$match": coarseFilter},
+		bson.M{"$match": filter},
+		bson.M{
+			"$project": bson.M{
+				"_id": 1,
+				"msgs": bson.M{
+					"$map": bson.M{
+						"input": "$msgs",
+						"as":    "msg",
+						"in": bson.M{
+							"$mergeObjects": bson.A{
+								"$$msg",
+								bson.M{
+									"_search_temp_index": bson.M{
+										"$indexOfArray": bson.A{
+											"$msgs", "$$msg",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		bson.M{"$unwind": "$msgs"},
+		bson.M{"$match": bson.M{"msgs.msg": bson.M{"$ne": nil}}},
+		bson.M{"$match": filter},
+		// dawn 2026-05-08 修复后台查不到老会话新消息：按消息发送时间分页，而不是按会话文档创建时间分页。
+		bson.M{"$sort": bson.D{{Key: "msgs.msg.send_time", Value: -1}, {Key: "_id", Value: -1}, {Key: "msgs._search_temp_index", Value: -1}}},
+		bson.M{
+			"$facet": bson.M{
+				"total": bson.A{
+					bson.M{"$count": "count"},
+				},
+				"data": bson.A{
+					bson.M{"$skip": skip},
+					bson.M{"$limit": showNumber},
+					bson.M{
+						"$project": bson.M{
+							"_id":   1,
+							"index": bson.A{"$msgs._search_temp_index"},
+						},
+					},
+				},
+			},
+		},
+	}
+	res, err := mongoutil.Aggregate[searchMessageFacet](ctx, m.coll, pipeline)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(res) == 0 {
+		return 0, nil, nil
+	}
+	var total int64
+	if len(res[0].Total) > 0 {
+		total = res[0].Total[0].Count
+	}
+	return total, res[0].Data, nil
 }
 
 func (m *MsgMgo) SearchMessage(ctx context.Context, req *msg.SearchMessageReq) (int64, []*model.MsgInfoModel, error) {
