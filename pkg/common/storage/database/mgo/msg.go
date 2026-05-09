@@ -457,7 +457,12 @@ func (m *MsgMgo) searchMessage(ctx context.Context, req *msg.SearchMessageReq) (
 		filter["msgs.msg.session_type"] = req.SessionType
 	}
 	if req.SendTime != "" {
-		sendTime, err := time.Parse(time.DateOnly, req.SendTime)
+		location, err := time.LoadLocation("Asia/Shanghai")
+		if err != nil {
+			location = time.Local
+		}
+		// dawn 2026-05-09 修复后台当天消息查不到：中国业务日期按 Asia/Shanghai 自然日转成 UTC 毫秒范围。
+		sendTime, err := time.ParseInLocation(time.DateOnly, req.SendTime, location)
 		if err != nil {
 			return 0, nil, errs.ErrArgs.WrapMsg("invalid sendTime", "req", req.SendTime, "format", time.DateOnly, "cause", err.Error())
 		}
