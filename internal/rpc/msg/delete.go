@@ -90,14 +90,8 @@ func (m *msgServer) DeleteMsgs(ctx context.Context, req *msg.DeleteMsgsReq) (*ms
 			return nil, err
 		}
 		if isSyncSelf {
-			// dawn 2026-05-06 修复后台删客户端无效：用户侧删除仍按原会话下发通知，避免客户端收到 user->user 自会话通知后不处理原聊天记录。
-			tips := &sdkws.DeleteMsgsTips{UserID: req.UserID, ConversationID: req.ConversationID, Seqs: req.Seqs}
-			m.notificationSender.NotificationWithSessionType(ctx, req.UserID, m.conversationAndGetRecvID(conv, req.UserID),
-				constant.DeleteMsgsNotification, conv.ConversationType, tips)
-			// dawn 2026-05-09 修复群消息删除不实时：群消息发送者本端删除时，额外定向通知被删除用户，避免发送者收不到群广播需切页后才刷新。
-			if conv.ConversationType == constant.ReadGroupChatType {
-				m.msgNotificationSender.UserDeleteMsgsNotification(ctx, req.UserID, req.ConversationID, req.Seqs)
-			}
+			// dawn 2026-05-10 修复后台删发送方仍需切页：用户侧删除应同步给被删除用户自己的所有端，而不是发给会话对方。
+			m.msgNotificationSender.UserDeleteMsgsNotification(ctx, req.UserID, req.ConversationID, req.Seqs)
 		}
 	}
 	return &msg.DeleteMsgsResp{}, nil
