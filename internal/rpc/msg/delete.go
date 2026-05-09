@@ -94,6 +94,10 @@ func (m *msgServer) DeleteMsgs(ctx context.Context, req *msg.DeleteMsgsReq) (*ms
 			tips := &sdkws.DeleteMsgsTips{UserID: req.UserID, ConversationID: req.ConversationID, Seqs: req.Seqs}
 			m.notificationSender.NotificationWithSessionType(ctx, req.UserID, m.conversationAndGetRecvID(conv, req.UserID),
 				constant.DeleteMsgsNotification, conv.ConversationType, tips)
+			// dawn 2026-05-09 修复群消息删除不实时：群消息发送者本端删除时，额外定向通知被删除用户，避免发送者收不到群广播需切页后才刷新。
+			if conv.ConversationType == constant.ReadGroupChatType {
+				m.msgNotificationSender.UserDeleteMsgsNotification(ctx, req.UserID, req.ConversationID, req.Seqs)
+			}
 		}
 	}
 	return &msg.DeleteMsgsResp{}, nil
