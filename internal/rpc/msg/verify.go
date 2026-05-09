@@ -65,8 +65,10 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		}
 		return errs.ErrNoPermission.WrapMsg("messages from imAdmin are disabled and will not be sent")
 	}
-	// 单聊禁止自己给自己发消息，不该存在此类记录
-	if data.MsgData.SessionType == constant.SingleChatType && data.MsgData.SendID == data.MsgData.RecvID {
+	// dawn 2026-05-09 修复群消息删除实时通知：单聊自发自收仅禁止普通消息，删除等系统通知需允许定向推送给本人。
+	isSingleSelfChat := data.MsgData.SessionType == constant.SingleChatType && data.MsgData.SendID == data.MsgData.RecvID
+	isNotification := data.MsgData.ContentType >= constant.NotificationBegin && data.MsgData.ContentType <= constant.NotificationEnd
+	if isSingleSelfChat && !isNotification {
 		return errs.ErrNoPermission.WrapMsg("self-to-self messages are not allowed")
 	}
 	// 组织角色：发送文件、发送名片（单聊/群聊均校验发送方）
