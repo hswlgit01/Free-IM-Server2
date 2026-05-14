@@ -197,12 +197,36 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 	if in1 && in2 {
 		return nil, servererrs.ErrRelationshipAlready.WrapMsg("already friends has f")
 	}
+	// dawn 2026-05-14 修复GroupManager加好友仍需审批：拥有该角色时直接建立双向好友关系并通知双方刷新。
+	if isDirectAddFriendRole(fromUser.OrgRole) {
+		if err := s.db.BecomeFriends(ctx, req.FromUserID, []string{req.ToUserID}, constant.BecomeFriendByApply); err != nil {
+			return nil, err
+		}
+		operationID := mcontext.GetOperationID(ctx)
+		opUserID := req.FromUserID
+		if !in1 {
+			if err := s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.ToUserID, req.FromUserID); err != nil {
+				log.ZWarn(ctx, "send direct friend added notification to applicant failed", err, "fromUserID", req.FromUserID, "toUserID", req.ToUserID)
+			}
+		}
+		if !in2 {
+			if err := s.notificationSender.FriendAddedNotification(ctx, operationID, opUserID, req.FromUserID, req.ToUserID); err != nil {
+				log.ZWarn(ctx, "send direct friend added notification to target failed", err, "fromUserID", req.FromUserID, "toUserID", req.ToUserID)
+			}
+		}
+		s.webhookAfterAddFriend(ctx, &s.config.WebhooksConfig.AfterAddFriend, req)
+		return resp, nil
+	}
 	if err = s.db.AddFriendRequest(ctx, req.FromUserID, req.ToUserID, req.ReqMsg, req.Ex); err != nil {
 		return nil, err
 	}
 	s.notificationSender.FriendApplicationAddNotification(ctx, req)
 	s.webhookAfterAddFriend(ctx, &s.config.WebhooksConfig.AfterAddFriend, req)
 	return resp, nil
+}
+
+func isDirectAddFriendRole(role string) bool {
+	return role == "GroupManager"
 }
 
 // ok.
