@@ -50,6 +50,13 @@ func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.
 }
 
 func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (*pbmsg.SendMsgResp, error) {
+	// dawn 2026-05-14 新增敏感词过滤：在生成 serverMsgID 前替换文本内容，保证落库和推送均为脱敏内容。
+	if len(sensitiveWordJSONFields(req.MsgData.GetContentType())) > 0 {
+		original := proto.Clone(req.MsgData).(*sdkws.MsgData)
+		if m.maskSensitiveMessageContent(ctx, req.MsgData) && before != nil && *before == nil {
+			*before = original
+		}
+	}
 	m.encapsulateMsgData(req.MsgData)
 	if req.MsgData.ContentType == constant.Stream {
 		if err := m.handlerStreamMsg(ctx, req.MsgData); err != nil {
