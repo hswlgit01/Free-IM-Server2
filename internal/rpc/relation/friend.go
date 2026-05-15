@@ -174,20 +174,9 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 		return nil, servererrs.ErrDifferentOrg.WrapMsg("cannot add friend from different organization")
 	}
 
-	// 校验发起者是否有权限添加好友
-	orgRolePermissionDao := thirdModel.NewOrganizationRolePermissionDao(s.mongoCli.GetDB())
 	orgId, err := primitive.ObjectIDFromHex(fromUser.OrgId)
 	if err != nil {
 		return nil, err
-	}
-
-	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(fromUser.OrgRole), thirdModel.PermissionCodeAddFriend)
-	if err != nil {
-		return nil, err
-	}
-
-	if !hasPermission {
-		return nil, errs.ErrNoPermission.WrapMsg("no org permission")
 	}
 
 	in1, in2, err := s.db.CheckIn(ctx, req.FromUserID, req.ToUserID)
@@ -197,7 +186,7 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 	if in1 && in2 {
 		return nil, servererrs.ErrRelationshipAlready.WrapMsg("already friends has f")
 	}
-	// dawn 2026-05-14 修复GroupManager加好友仍需审批：拥有该角色时直接建立双向好友关系并通知双方刷新。
+	// dawn 2026-05-15 修复团队长/业务员加好友失败：直加角色自身即为授权，先建双向好友再走普通权限校验。
 	if isDirectAddFriendRole(fromUser.OrgRole) {
 		if err := s.db.BecomeFriends(ctx, req.FromUserID, []string{req.ToUserID}, constant.BecomeFriendByApply); err != nil {
 			return nil, err
@@ -217,6 +206,17 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 		s.webhookAfterAddFriend(ctx, &s.config.WebhooksConfig.AfterAddFriend, req)
 		return resp, nil
 	}
+
+	// 校验发起者是否有权限添加好友
+	orgRolePermissionDao := thirdModel.NewOrganizationRolePermissionDao(s.mongoCli.GetDB())
+	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(fromUser.OrgRole), thirdModel.PermissionCodeAddFriend)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, errs.ErrNoPermission.WrapMsg("no org permission")
+	}
 	if err = s.db.AddFriendRequest(ctx, req.FromUserID, req.ToUserID, req.ReqMsg, req.Ex); err != nil {
 		return nil, err
 	}
@@ -226,7 +226,12 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 }
 
 func isDirectAddFriendRole(role string) bool {
-	return role == "GroupManager"
+	switch role {
+	case "GroupManager", "TermManager":
+		return true
+	default:
+		return false
+	}
 }
 
 // ok.
