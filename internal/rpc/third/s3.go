@@ -64,7 +64,7 @@ func (t *thirdServer) InitiateMultipartUpload(ctx context.Context, req *third.In
 	// 从配置文件读取文件大小限制
 	maxFileSizeMB := t.config.RpcConfig.MaxUploadSize
 	if maxFileSizeMB <= 0 {
-		maxFileSizeMB = 50 // 默认50MB
+		maxFileSizeMB = 200 // dawn 2026-05-21 修复上传文件限制：未配置时默认允许200MB。
 	}
 	maxFileSize := maxFileSizeMB * 1024 * 1024 // 转换为字节
 	if req.Size > maxFileSize {
@@ -235,7 +235,7 @@ func (t *thirdServer) InitiateFormData(ctx context.Context, req *third.InitiateF
 	// 从配置文件读取文件大小限制
 	maxFileSizeMB := t.config.RpcConfig.MaxUploadSize
 	if maxFileSizeMB <= 0 {
-		maxFileSizeMB = 50 // 默认50MB
+		maxFileSizeMB = 200 // dawn 2026-05-21 修复上传文件限制：未配置时默认允许200MB。
 	}
 	maxFileSize := maxFileSizeMB * 1024 * 1024 // 转换为字节
 	if req.Size > maxFileSize {

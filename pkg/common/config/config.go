@@ -280,7 +280,7 @@ type Third struct {
 		Kodo   Kodo   `yaml:"kodo"`
 		Aws    Aws    `yaml:"aws"`
 	} `yaml:"object"`
-	MaxUploadSize int64 `yaml:"maxUploadSize"` // 最大上传文件大小，单位MB，默认50MB
+	MaxUploadSize int64 `yaml:"maxUploadSize"` // dawn 2026-05-21 修复上传文件限制：最大上传文件大小，单位MB，默认200MB
 }
 type Cos struct {
 	BucketURL    string `yaml:"bucketURL"`

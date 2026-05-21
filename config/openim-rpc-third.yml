@@ -62,5 +62,6 @@ object:
     # URL格式: "virtual-hosted" 或 "path-style" 测试环境使用 path-style 生产使用 virtual-hosted
     urlStyle: virtual-hosted
 
+# dawn 2026-05-21 修复上传文件限制：会聊文件上传上限调整为200MB。
 # 最大上传文件大小限制，单位：MB
-maxUploadSize: 50
+maxUploadSize: 200
