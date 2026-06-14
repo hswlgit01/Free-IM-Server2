@@ -329,30 +329,8 @@ func (g *groupDatabase) PageGetJoinGroup(ctx context.Context, userID string, pag
 }
 
 func (g *groupDatabase) PageGetGroupMember(ctx context.Context, groupID string, pagination pagination.Pagination) (total int64, totalGroupMembers []*model.GroupMember, err error) {
-	groupMemberIDs, err := g.cache.GetGroupMemberIDs(ctx, groupID)
-	if err != nil {
-		return 0, nil, err
-	}
-	pageIDs := datautil.Paginate(groupMemberIDs, int(pagination.GetPageNumber()), int(pagination.GetShowNumber()))
-	if len(pageIDs) == 0 {
-		return int64(len(groupMemberIDs)), nil, nil
-	}
-	members, err := g.cache.GetGroupMembersInfo(ctx, groupID, pageIDs)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	membersMap := make(map[string]*model.GroupMember)
-	for _, member := range members {
-		membersMap[member.UserID] = member
-	}
-
-	sortMembers := make([]*model.GroupMember, 0)
-	for _, memberID := range pageIDs {
-		sortMembers = append(sortMembers, membersMap[memberID])
-	}
-
-	return int64(len(groupMemberIDs)), sortMembers, nil
+	// dawn 2026-06-14 优化3万人群成员分页：直接走数据库分页，避免每次分页先从Redis/Mongo取全量成员ID。
+	return g.groupMemberDB.PageFindMember(ctx, groupID, pagination)
 }
 
 func (g *groupDatabase) SearchGroupMember(ctx context.Context, keyword string, groupID string, pagination pagination.Pagination) (int64, []*model.GroupMember, error) {

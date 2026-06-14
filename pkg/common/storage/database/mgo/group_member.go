@@ -32,12 +32,30 @@ import (
 
 func NewGroupMember(db *mongo.Database) (database.GroupMember, error) {
 	coll := db.Collection(database.GroupMemberName)
-	_, err := coll.Indexes().CreateOne(context.Background(), mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "group_id", Value: 1},
-			{Key: "user_id", Value: 1},
+	_, err := coll.Indexes().CreateMany(context.Background(), []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
+				{Key: "user_id", Value: 1},
+			},
+			Options: options.Index().SetUnique(true),
 		},
-		Options: options.Index().SetUnique(true),
+		{
+			// dawn 2026-06-14 优化3万人群成员分页：按群内角色/入群时间排序走索引，避免分页前全量取成员ID。
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
+				{Key: "role_level", Value: -1},
+				{Key: "join_time", Value: -1},
+				{Key: "nickname", Value: 1},
+			},
+		},
+		{
+			// dawn 2026-06-14 优化3万人群成员搜索：按群和昵称建立索引，降低成员搜索扫描范围。
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
+				{Key: "nickname", Value: 1},
+			},
+		},
 	})
 	if err != nil {
 		return nil, errs.Wrap(err)
@@ -160,6 +178,10 @@ func (g *GroupMemberMgo) FindMemberUserID(ctx context.Context, groupID string) (
 	return mongoutil.Find[string](ctx, g.coll, bson.M{"group_id": groupID}, options.Find().SetProjection(bson.M{"_id": 0, "user_id": 1}).SetSort(g.memberSort()))
 }
 
+func (g *GroupMemberMgo) PageFindMember(ctx context.Context, groupID string, pagination pagination.Pagination) (int64, []*model.GroupMember, error) {
+	return mongoutil.FindPage[*model.GroupMember](ctx, g.coll, bson.M{"group_id": groupID}, pagination, options.Find().SetSort(g.memberSort()))
+}
+
 func (g *GroupMemberMgo) Find(ctx context.Context, groupID string, userIDs []string) ([]*model.GroupMember, error) {
 	filter := bson.M{"group_id": groupID}
 	if len(userIDs) > 0 {
@@ -190,7 +212,13 @@ func (g *GroupMemberMgo) FindRoleLevelUserIDs(ctx context.Context, groupID strin
 }
 
 func (g *GroupMemberMgo) SearchMember(ctx context.Context, keyword string, groupID string, pagination pagination.Pagination) (int64, []*model.GroupMember, error) {
-	filter := bson.M{"group_id": groupID, "nickname": bson.M{"$regex": keyword}}
+	filter := bson.M{
+		"group_id": groupID,
+		"$or": []bson.M{
+			{"user_id": keyword},
+			{"nickname": bson.M{"$regex": keyword}},
+		},
+	}
 	return mongoutil.FindPage[*model.GroupMember](ctx, g.coll, filter, pagination, options.Find().SetSort(g.memberSort()))
 }
 

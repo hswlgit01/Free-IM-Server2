@@ -28,6 +28,7 @@ type GroupMember interface {
 	UpdateRoleLevel(ctx context.Context, groupID string, userID string, roleLevel int32) error
 	UpdateUserRoleLevels(ctx context.Context, groupID string, firstUserID string, firstUserRoleLevel int32, secondUserID string, secondUserRoleLevel int32) error
 	FindMemberUserID(ctx context.Context, groupID string) (userIDs []string, err error)
+	PageFindMember(ctx context.Context, groupID string, pagination pagination.Pagination) (total int64, groupMembers []*model.GroupMember, err error)
 	Take(ctx context.Context, groupID string, userID string) (groupMember *model.GroupMember, err error)
 	Find(ctx context.Context, groupID string, userIDs []string) ([]*model.GroupMember, error)
 	FindInGroup(ctx context.Context, userID string, groupIDs []string) ([]*model.GroupMember, error)

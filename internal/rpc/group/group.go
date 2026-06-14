@@ -584,34 +584,14 @@ func (g *groupServer) GetGroupMemberList(ctx context.Context, req *pbgroup.GetGr
 	if req.Keyword == "" {
 		total, members, err = g.db.PageGetGroupMember(ctx, req.GroupID, req.Pagination)
 	} else {
-		members, err = g.db.FindGroupMemberAll(ctx, req.GroupID)
+		// dawn 2026-06-14 优化3万人群成员搜索：关键字查询直接数据库分页，避免先取全群成员再内存过滤。
+		total, members, err = g.db.SearchGroupMember(ctx, req.Keyword, req.GroupID, req.Pagination)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if err := g.PopulateGroupMember(ctx, members...); err != nil {
 		return nil, err
-	}
-	if req.Keyword != "" {
-		groupMembers := make([]*model.GroupMember, 0)
-		for _, member := range members {
-			if member.UserID == req.Keyword {
-				groupMembers = append(groupMembers, member)
-				total++
-				continue
-			}
-			if member.Nickname == req.Keyword {
-				groupMembers = append(groupMembers, member)
-				total++
-				continue
-			}
-		}
-
-		members := datautil.Paginate(groupMembers, int(req.Pagination.GetPageNumber()), int(req.Pagination.GetShowNumber()))
-		return &pbgroup.GetGroupMemberListResp{
-			Total:   uint32(total),
-			Members: datautil.Batch(convert.Db2PbGroupMember, members),
-		}, nil
 	}
 	return &pbgroup.GetGroupMemberListResp{
 		Total:   uint32(total),

@@ -30,6 +30,6 @@ enableHistoryForNewMembers: true
 # 群组限制配置
 groupLimits:
   # 单个群组最大成员数限制
-  maxMembersPerGroup: 10000
+  maxMembersPerGroup: 30000
   # 是否启用群组成员数限制检查
   enableMemberLimitCheck: true
