@@ -227,7 +227,8 @@ func (s *friendServer) ApplyToAddFriend(ctx context.Context, req *relation.Apply
 
 func isDirectAddFriendRole(role string) bool {
 	switch role {
-	case "GroupManager", "TermManager":
+	// dawn 2026-06-16 修复管理员加好友后通讯录不落地：后台管理员和团队长一样走直加好友关系。
+	case "SuperAdmin", "BackendAdmin", "GroupManager", "TermManager":
 		return true
 	default:
 		return false
