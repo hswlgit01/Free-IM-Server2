@@ -42,7 +42,8 @@ func FriendDB2Pb(ctx context.Context, friendDB *model.Friend, getUsers func(ctx 
 		return nil, err
 	}
 	user, ok := users[friendDB.FriendUserID]
-	if !ok {
+	// dawn 2026-06-17 修复单个好友资料转换崩溃：历史好友关系可能指向已缺失用户资料。
+	if !ok || user == nil {
 		return nil, fmt.Errorf("user not found: %s", friendDB.FriendUserID)
 	}
 
@@ -76,16 +77,21 @@ func FriendsDB2Pb(ctx context.Context, friendsDB []*model.Friend, getUsers func(
 		return nil, err
 	}
 	for _, friend := range friendsDB {
+		user, ok := users[friend.FriendUserID]
+		// dawn 2026-06-17 修复好友列表崩溃：历史好友关系可能指向已缺失用户资料，跳过脏关系避免空指针导致整页失败。
+		if !ok || user == nil {
+			continue
+		}
 		friendPb := &sdkws.FriendInfo{FriendUser: &sdkws.UserInfo{}}
 		err := datautil.CopyStructFields(friendPb, friend)
 		if err != nil {
 			return nil, err
 		}
 
-		friendPb.FriendUser.UserID = users[friend.FriendUserID].UserID
-		friendPb.FriendUser.Nickname = users[friend.FriendUserID].Nickname
-		friendPb.FriendUser.FaceURL = users[friend.FriendUserID].FaceURL
-		friendPb.FriendUser.Ex = users[friend.FriendUserID].Ex
+		friendPb.FriendUser.UserID = user.UserID
+		friendPb.FriendUser.Nickname = user.Nickname
+		friendPb.FriendUser.FaceURL = user.FaceURL
+		friendPb.FriendUser.Ex = user.Ex
 		friendPb.CreateTime = friend.CreateTime.Unix()
 		friendPb.IsPinned = friend.IsPinned
 		friendsPb = append(friendsPb, friendPb)
@@ -125,6 +131,10 @@ func FriendRequestDB2Pb(ctx context.Context, friendRequests []*model.FriendReque
 	for _, friendRequest := range friendRequests {
 		toUser := users[friendRequest.ToUserID]
 		fromUser := users[friendRequest.FromUserID]
+		// dawn 2026-06-17 修复好友申请列表崩溃：历史申请引用的用户资料缺失时跳过脏记录。
+		if toUser == nil || fromUser == nil {
+			continue
+		}
 		res = append(res, &sdkws.FriendRequest{
 			FromUserID:    friendRequest.FromUserID,
 			FromNickname:  fromUser.Nickname,

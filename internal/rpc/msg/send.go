@@ -19,7 +19,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/prommetrics"
+	"github.com/openimsdk/open-im-server/v3/pkg/common/servererrs"
 	"github.com/openimsdk/open-im-server/v3/pkg/msgprocessor"
 	"github.com/openimsdk/open-im-server/v3/pkg/util/conversationutil"
 	"github.com/openimsdk/open-im-server/v3/protocol/constant"
@@ -55,6 +57,13 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 		original := proto.Clone(req.MsgData).(*sdkws.MsgData)
 		if m.maskSensitiveMessageContent(ctx, req.MsgData) && before != nil && *before == nil {
 			*before = original
+		}
+	}
+	// dawn 2026-06-16 修复单聊发送先成功后失败：在进入异步消息处理前先做一次同步预检，
+	// 让“非好友不可直聊”这类错误直接返回，避免客户端先展示发送成功再回头报错。
+	if req.MsgData.SessionType == constant.SingleChatType {
+		if err := m.preflightSingleChatMsg(ctx, req); err != nil {
+			return nil, err
 		}
 	}
 	m.encapsulateMsgData(req.MsgData)
@@ -133,6 +142,53 @@ func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before *
 
 	// 立即返回确认
 	return resp, nil
+}
+
+func (m *msgServer) preflightSingleChatMsg(ctx context.Context, data *pbmsg.SendMsgReq) error {
+	if data.MsgData == nil {
+		return errs.ErrArgs.WrapMsg("msgData is nil")
+	}
+	if data.MsgData.ContentType >= constant.NotificationBegin && data.MsgData.ContentType <= constant.NotificationEnd {
+		return nil
+	}
+	if err := m.checkOrgContentSendPermission(ctx, data.MsgData); err != nil {
+		return err
+	}
+	if data.MsgData.SendID == data.MsgData.RecvID {
+		return errs.ErrNoPermission.WrapMsg("self-to-self messages are not allowed")
+	}
+	u, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.SendID)
+	if err != nil {
+		return err
+	}
+	recv, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.RecvID)
+	if err != nil {
+		return err
+	}
+	if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) ||
+		u.CanSendFreeMsg == constant.MessageFreeLevel ||
+		recv.CanSendFreeMsg == constant.MessageFreeLevel ||
+		isPrivilegedOrgRole(u.OrgRole) ||
+		isPrivilegedOrgRole(recv.OrgRole) {
+		return nil
+	}
+	black, err := m.FriendLocalCache.IsBlack(ctx, data.MsgData.SendID, data.MsgData.RecvID)
+	if err != nil {
+		return err
+	}
+	if black {
+		return servererrs.ErrBlockedByPeer.Wrap()
+	}
+	if m.config.RpcConfig.FriendVerify {
+		friend, err := m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
+		if err != nil {
+			return err
+		}
+		if !friend {
+			return servererrs.ErrNotPeersFriend.Wrap()
+		}
+	}
+	return nil
 }
 
 func (m *msgServer) processGroupChatMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
