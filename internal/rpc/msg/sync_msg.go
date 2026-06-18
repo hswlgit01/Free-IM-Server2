@@ -65,8 +65,9 @@ func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessag
 				resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
 				continue
 			}
+			userMaxSeq := m.getPullUserMaxSeq(ctx, req.UserID, seq.ConversationID, conversation.MaxSeq)
 			minSeq, maxSeq, msgs, err := m.MsgDatabase.GetMsgBySeqsRange(ctx, req.UserID, seq.ConversationID,
-				seq.Begin, seq.End, seq.Num, conversation.MaxSeq)
+				seq.Begin, seq.End, seq.Num, userMaxSeq)
 			if err != nil {
 				log.ZWarn(ctx, "GetMsgBySeqsRange error", err, "conversationID", seq.ConversationID, "seq", seq)
 				resp.Msgs[seq.ConversationID] = &sdkws.PullMsgs{Msgs: []*sdkws.MsgData{}, IsEnd: false}
@@ -137,6 +138,23 @@ func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessag
 		}
 	}
 	return resp, nil
+}
+
+func (m *msgServer) getPullUserMaxSeq(ctx context.Context, userID, conversationID string, conversationMaxSeq int64) int64 {
+	if !msgprocessor.IsGroupConversationID(conversationID) {
+		return conversationMaxSeq
+	}
+	groupID := strings.TrimPrefix(strings.TrimPrefix(conversationID, "sg_"), "g_")
+	if groupID == "" {
+		return conversationMaxSeq
+	}
+	// dawn 2026-06-18 修复3万人群消息不同步：仍在群内的成员拉历史时使用群全局 MaxSeq，避免被个人会话 MaxSeq 截断。
+	if _, err := m.GroupLocalCache.GetGroupMember(ctx, groupID, userID); err != nil {
+		log.ZWarn(ctx, "PullMessageBySeqs group member check failed, keep conversation max seq cap", err,
+			"userID", userID, "conversationID", conversationID, "groupID", groupID, "conversationMaxSeq", conversationMaxSeq)
+		return conversationMaxSeq
+	}
+	return 0
 }
 
 func (m *msgServer) GetSeqMessage(ctx context.Context, req *msg.GetSeqMessageReq) (*msg.GetSeqMessageResp, error) {
