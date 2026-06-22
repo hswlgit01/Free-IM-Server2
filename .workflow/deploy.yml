@@ -1,0 +1,44 @@
+version: '1.0'
+name: deploy-free-im-server
+displayName: 部署 Free-IM-Server
+
+# dawn 2026-06-22 迁移 Gitee Go：仓库迁到 Gitee 后由目标服务器主机组直接构建并部署。
+triggers:
+  push:
+    branches:
+      include:
+        - main
+        - master
+        - dev
+
+stages:
+  - stage:
+      name: build_and_deploy
+      displayName: 构建并部署
+      steps:
+        - step: shell@agent
+          name: deploy_server
+          displayName: Docker 构建部署 Free-IM-Server
+          hostGroupID: freechat-prod
+          script: |
+            set -euo pipefail
+
+            IMAGE_NAME=freechat-server
+            CONTAINER_NAME=freechat-server
+
+            docker build -t "${IMAGE_NAME}:latest" .
+
+            docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+            docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+
+            mkdir -p /data/app/server/config /data/logs/server
+
+            docker run -d \
+              --name "${CONTAINER_NAME}" \
+              --restart unless-stopped \
+              --network host \
+              -v /data/app/server/config:/im-server/config \
+              -v /data/logs/server:/im-server/_output/logs \
+              "${IMAGE_NAME}:latest"
+
+            docker ps --filter "name=${CONTAINER_NAME}"
