@@ -246,19 +246,27 @@ func (g *groupServer) CreateGroup(ctx context.Context, req *pbgroup.CreateGroupR
 	//}
 
 	// 校验发起者是否有权限创建群组
-	orgRolePermissionDao := thirdModel.NewOrganizationRolePermissionDao(g.mongoCli.GetDB())
-	orgId, err := primitive.ObjectIDFromHex(info.OrgId)
-	if err != nil {
-		return nil, err
-	}
-
-	hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, orgId, thirdModel.OrganizationUserRole(info.OrgRole), thirdModel.PermissionCodeCreateGroup)
-	if err != nil {
-		return nil, err
-	}
-
-	if !hasPermission {
-		return nil, errs.ErrNoPermission.WrapMsg("no org permission")
+	// dawn 2026-06-23 修复组织后台(选普通用户当群主/带图标)建群报 "no org permission"：
+	// 建群权限应校验"发起者"(opUserID)，而非被设为群主的目标用户;原逻辑误用群主(OwnerUserID)的角色，
+	// 当群主是普通成员时即报无权限。组织后台以 IM 管理员 token 发起(opUserID 为管理员)应直接放行。
+	if !authverify.IsAppManagerUid(ctx, g.config.Share.IMAdminUserID) {
+		opUserID := mcontext.GetOpUserID(ctx)
+		opInfo, err := g.userClient.GetUserInfo(ctx, opUserID)
+		if err != nil {
+			return nil, err
+		}
+		orgRolePermissionDao := thirdModel.NewOrganizationRolePermissionDao(g.mongoCli.GetDB())
+		opOrgId, err := primitive.ObjectIDFromHex(opInfo.OrgId)
+		if err != nil {
+			return nil, err
+		}
+		hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, opOrgId, thirdModel.OrganizationUserRole(opInfo.OrgRole), thirdModel.PermissionCodeCreateGroup)
+		if err != nil {
+			return nil, err
+		}
+		if !hasPermission {
+			return nil, errs.ErrNoPermission.WrapMsg("no org permission")
+		}
 	}
 
 	//验证群组信息  获取创建者的组织ID  插入到group中
