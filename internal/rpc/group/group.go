@@ -260,12 +260,21 @@ func (g *groupServer) CreateGroup(ctx context.Context, req *pbgroup.CreateGroupR
 		if err != nil {
 			return nil, err
 		}
-		hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, opOrgId, thirdModel.OrganizationUserRole(opInfo.OrgRole), thirdModel.PermissionCodeCreateGroup)
+		// dawn 2026-06-24 修复手机端普通成员建群被全量拦截：很多组织从未配置过 create_group 权限
+		// (organization_role_permission 无相关记录)，此时强制校验会导致所有人(除 app 管理员)都建不了群。
+		// 改为：仅当该组织"确实给某角色配置过 create_group"时才强制校验发起者角色权限；未配置则放行。
+		configured, err := orgRolePermissionDao.ExistAnyRolePermission(ctx, opOrgId, thirdModel.PermissionCodeCreateGroup)
 		if err != nil {
 			return nil, err
 		}
-		if !hasPermission {
-			return nil, errs.ErrNoPermission.WrapMsg("no org permission")
+		if configured {
+			hasPermission, err := orgRolePermissionDao.ExistPermission(ctx, opOrgId, thirdModel.OrganizationUserRole(opInfo.OrgRole), thirdModel.PermissionCodeCreateGroup)
+			if err != nil {
+				return nil, err
+			}
+			if !hasPermission {
+				return nil, errs.ErrNoPermission.WrapMsg("no org permission")
+			}
 		}
 	}
 

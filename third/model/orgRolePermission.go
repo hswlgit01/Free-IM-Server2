@@ -78,3 +78,9 @@ func (o *OrganizationRolePermissionDao) DeleteByOrgIdAndRole(ctx context.Context
 func (o *OrganizationRolePermissionDao) ExistPermission(ctx context.Context, orgId primitive.ObjectID, role OrganizationUserRole, code PermissionCode) (bool, error) {
 	return mongoutil.Exist(ctx, o.Collection, bson.M{"org_id": orgId, "role": role, "permission_code": code})
 }
+
+// dawn 2026-06-24 判断某组织是否给"任意角色"配置过某权限。
+// 用于建群等权限：仅当组织确实配置过该权限时才强制校验，否则放行(避免未配置权限的组织被全量拦截)。
+func (o *OrganizationRolePermissionDao) ExistAnyRolePermission(ctx context.Context, orgId primitive.ObjectID, code PermissionCode) (bool, error) {
+	return mongoutil.Exist(ctx, o.Collection, bson.M{"org_id": orgId, "permission_code": code})
+}
