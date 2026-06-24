@@ -362,7 +362,8 @@ func (g *groupServer) CreateGroup(ctx context.Context, req *pbgroup.CreateGroupR
 		tips.MemberList = append(tips.MemberList, g.groupMemberDB2PB(member, userMap[member.UserID].AppMangerLevel))
 		if member.UserID == opUserID {
 			tips.OpUser = g.groupMemberDB2PB(member, userMap[member.UserID].AppMangerLevel)
-			break
+			// dawn 2026-06-24 修复建群后非创建者群成员列表不全：原先遇到操作者就 break 提前结束循环，
+			// 导致 tips.MemberList 被截断(只剩到操作者为止)、且后续成员的组织校验被跳过。改为不中断，遍历全部成员。
 		}
 	}
 	g.notification.GroupCreatedNotification(ctx, tips, req.SendMessage)
