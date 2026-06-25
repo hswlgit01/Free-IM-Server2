@@ -612,7 +612,9 @@ func (l *CacheConfig) Enable() bool {
 
 func InitNotification(notification *Notification) {
 	notification.GroupCreated.UnreadCount = false
-	notification.GroupCreated.ReliabilityLevel = 1
+	// dawn 2026-06-25 修复建群后成员(尤其离线/后台)看不到群：建群通知必须持久化(2=存历史+落库+分配seq)，
+	// 否则新群在有人发文字前唯一的"消息"是不落库的建群通知，离线成员同步不到→看不到群但实际在群里。
+	notification.GroupCreated.ReliabilityLevel = 2
 	notification.GroupInfoSet.UnreadCount = false
 	notification.GroupInfoSet.ReliabilityLevel = 1
 	notification.JoinGroupApplication.UnreadCount = false
@@ -628,9 +630,11 @@ func InitNotification(notification *Notification) {
 	notification.MemberKicked.UnreadCount = false
 	notification.MemberKicked.ReliabilityLevel = 1
 	notification.MemberInvited.UnreadCount = false
-	notification.MemberInvited.ReliabilityLevel = 1
+	// dawn 2026-06-25 同建群：被邀请入群通知需持久化，离线成员同步时才能拿到、生成群会话。
+	notification.MemberInvited.ReliabilityLevel = 2
 	notification.MemberEnter.UnreadCount = false
-	notification.MemberEnter.ReliabilityLevel = 1
+	// dawn 2026-06-25 同建群：入群通知需持久化，离线成员同步时才能拿到、生成群会话。
+	notification.MemberEnter.ReliabilityLevel = 2
 	notification.GroupDismissed.UnreadCount = false
 	notification.GroupDismissed.ReliabilityLevel = 1
 	notification.GroupMuted.UnreadCount = false
