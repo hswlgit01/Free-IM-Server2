@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,12 +59,18 @@ func NewThirdApi(client third.ThirdClient, grafanaUrl string, thirdConfig *confi
 // getHTTPClient 获取复用的HTTP客户端
 func (o *ThirdApi) getHTTPClient() *http.Client {
 	o.once.Do(func() {
+		// dawn 2026-07-03 修复大文件(APK等)接收后"解析软件包出错/大小不符"：
+		// 原来 http.Client.Timeout=60s 是【整个请求】的总超时，133MB 文件在慢网下超 60s 即被中途断流截断
+		// (实测限速 1MB/s 时 64s 处只下到 64MB/103MB)。去掉总超时，改为只限制连接建立/响应头超时，
+		// 不再对大文件的 body 传输总时长设上限。
 		o.httpClient = &http.Client{
-			Timeout: 60 * time.Second, // 增加超时时间以支持大文件
+			Timeout: 0,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
+				DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+				ResponseHeaderTimeout: 30 * time.Second,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   10,
+				IdleConnTimeout:       90 * time.Second,
 			},
 		}
 	})
