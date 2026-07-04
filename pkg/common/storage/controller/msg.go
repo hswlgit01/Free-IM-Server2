@@ -58,6 +58,10 @@ type CommonMsgDatabase interface {
 	GetMsgBySeqsRange(ctx context.Context, userID string, conversationID string, begin, end, num, userMaxSeq int64) (minSeq int64, maxSeq int64, seqMsg []*sdkws.MsgData, err error)
 	// GetMsgBySeqs retrieves messages for large groups from MongoDB by sequence numbers.
 	GetMsgBySeqs(ctx context.Context, userID string, conversationID string, seqs []int64) (minSeq int64, maxSeq int64, seqMsg []*sdkws.MsgData, err error)
+	// GetMsgForRevoke retrieves a single message by conversation seq WITHOUT the per-user min/max seq
+	// clamp used in GetMsgBySeqs, so a group owner/admin can revoke messages sent before they joined
+	// (old messages). Returns nil if the seq is not found. userID only affects the delete/revoke handler.
+	GetMsgForRevoke(ctx context.Context, conversationID string, userID string, seq int64) (*sdkws.MsgData, error)
 
 	GetMessagesBySeqWithBounds(ctx context.Context, userID string, conversationID string, seqs []int64, pullOrder sdkws.PullOrder) (bool, int64, []*sdkws.MsgData, error)
 	// DeleteUserMsgsBySeqs allows a user to delete messages based on sequence numbers.
@@ -498,6 +502,28 @@ func (db *commonMsgDatabase) GetMsgBySeqs(ctx context.Context, userID string, co
 		return 0, 0, nil, err
 	}
 	return minSeq, maxSeq, successMsgs, nil
+}
+
+// GetMsgForRevoke fetches a single message by conversation seq for the revoke flow. Unlike GetMsgBySeqs,
+// it does NOT clamp the seq to the caller's userMinSeq/userMaxSeq, so a group owner/admin (whose personal
+// min seq is high because they joined recently) can still locate and revoke older messages from others.
+// It keeps handlerDeleteAndRevoked so an already-revoked message is still reported as MsgRevokeNotification.
+// Returns (nil, nil) when the seq is not present in storage.
+func (db *commonMsgDatabase) GetMsgForRevoke(ctx context.Context, conversationID string, userID string, seq int64) (*sdkws.MsgData, error) {
+	if seq <= 0 {
+		return nil, nil
+	}
+	msgs, err := db.msgCache.GetMessageBySeqs(ctx, conversationID, []int64{seq})
+	if err != nil {
+		return nil, err
+	}
+	db.handlerDeleteAndRevoked(ctx, userID, msgs)
+	for i := range msgs {
+		if msgs[i] != nil && msgs[i].Msg != nil && msgs[i].Msg.Seq == seq {
+			return convert.MsgDB2Pb(msgs[i].Msg), nil
+		}
+	}
+	return nil, nil
 }
 
 func (db *commonMsgDatabase) GetMessagesBySeqWithBounds(ctx context.Context, userID string, conversationID string, seqs []int64, pullOrder sdkws.PullOrder) (bool, int64, []*sdkws.MsgData, error) {

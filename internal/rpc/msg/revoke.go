@@ -48,38 +48,41 @@ func (m *msgServer) RevokeMsg(ctx context.Context, req *msg.RevokeMsgReq) (*msg.
 	if err != nil {
 		return nil, err
 	}
-	_, _, msgs, err := m.MsgDatabase.GetMsgBySeqs(ctx, req.UserID, req.ConversationID, []int64{req.Seq})
+	// dawn 2026-07-04 修复"管理员撤不回别人旧消息"：原先用 GetMsgBySeqs 会把 seq 夹在撤回者自己的
+	// userMinSeq/userMaxSeq 内，群主/管理员若入群较晚（个人 minSeq 高），撤更早的消息会被过滤成
+	// "msg not found"。改用 GetMsgForRevoke 按会话 seq 直取，权限仍由下方群角色判断把关。
+	revokeMsg, err := m.MsgDatabase.GetMsgForRevoke(ctx, req.ConversationID, req.UserID, req.Seq)
 	if err != nil {
 		return nil, err
 	}
-	if len(msgs) == 0 || msgs[0] == nil {
+	if revokeMsg == nil {
 		return nil, errs.ErrRecordNotFound.WrapMsg("msg not found")
 	}
-	if msgs[0].ContentType == constant.MsgRevokeNotification {
+	if revokeMsg.ContentType == constant.MsgRevokeNotification {
 		return nil, servererrs.ErrMsgAlreadyRevoke.WrapMsg("msg already revoke")
 	}
 
-	data, _ := json.Marshal(msgs[0])
-	log.ZDebug(ctx, "GetMsgBySeqs", "conversationID", req.ConversationID, "seq", req.Seq, "msg", string(data))
+	data, _ := json.Marshal(revokeMsg)
+	log.ZDebug(ctx, "GetMsgForRevoke", "conversationID", req.ConversationID, "seq", req.Seq, "msg", string(data))
 	var role int32
 	if !authverify.IsAppManagerUid(ctx, m.config.Share.IMAdminUserID) {
-		sessionType := msgs[0].SessionType
+		sessionType := revokeMsg.SessionType
 		switch sessionType {
 		case constant.SingleChatType:
-			if err := authverify.CheckAccessV3(ctx, msgs[0].SendID, m.config.Share.IMAdminUserID); err != nil {
+			if err := authverify.CheckAccessV3(ctx, revokeMsg.SendID, m.config.Share.IMAdminUserID); err != nil {
 				return nil, err
 			}
 			role = user.AppMangerLevel
 		case constant.ReadGroupChatType:
-			members, err := m.GroupLocalCache.GetGroupMemberInfoMap(ctx, msgs[0].GroupID, datautil.Distinct([]string{req.UserID, msgs[0].SendID}))
+			members, err := m.GroupLocalCache.GetGroupMemberInfoMap(ctx, revokeMsg.GroupID, datautil.Distinct([]string{req.UserID, revokeMsg.SendID}))
 			if err != nil {
 				return nil, err
 			}
-			if req.UserID != msgs[0].SendID {
+			if req.UserID != revokeMsg.SendID {
 				switch members[req.UserID].RoleLevel {
 				case constant.GroupOwner:
 				case constant.GroupAdmin:
-					if sendMember, ok := members[msgs[0].SendID]; ok {
+					if sendMember, ok := members[revokeMsg.SendID]; ok {
 						if sendMember.RoleLevel != constant.GroupOrdinaryUsers {
 							return nil, errs.ErrNoPermission.WrapMsg("no permission")
 						}
@@ -105,14 +108,14 @@ func (m *msgServer) RevokeMsg(ctx context.Context, req *msg.RevokeMsgReq) (*msg.
 	if err != nil {
 		return nil, err
 	}
-	tips := buildRevokeMsgTips(req.UserID, req.ConversationID, msgs[0], req.Seq, now, m.config.Share.IMAdminUserID)
+	tips := buildRevokeMsgTips(req.UserID, req.ConversationID, revokeMsg, req.Seq, now, m.config.Share.IMAdminUserID)
 	var recvID string
-	if msgs[0].SessionType == constant.ReadGroupChatType {
-		recvID = msgs[0].GroupID
+	if revokeMsg.SessionType == constant.ReadGroupChatType {
+		recvID = revokeMsg.GroupID
 	} else {
-		recvID = msgs[0].RecvID
+		recvID = revokeMsg.RecvID
 	}
-	m.notificationSender.NotificationWithSessionType(ctx, req.UserID, recvID, constant.MsgRevokeNotification, msgs[0].SessionType, &tips)
+	m.notificationSender.NotificationWithSessionType(ctx, req.UserID, recvID, constant.MsgRevokeNotification, revokeMsg.SessionType, &tips)
 	m.webhookAfterRevokeMsg(ctx, &m.config.WebhooksConfig.AfterRevokeMsg, req)
 	return &msg.RevokeMsgResp{}, nil
 }
