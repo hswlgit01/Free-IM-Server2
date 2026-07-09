@@ -150,7 +150,26 @@ func String2Pb(s string, pb proto.Message) error {
 
 // ShouldDeliverSystemMsgToChat 判断系统产生的通知类消息是否要写入会话并下发给客户端。
 // 返回 false 时：不写入聊天缓存/DB、不推送给客户端，用于减少群聊/单聊里大量系统推送刷屏且不影响正常功能。
-// 始终下发：HasReadReceipt（已读回执）、MsgRevokeNotification/DeleteMsgsNotification（撤回/删除）、用户消息；不下发：其余系统通知（如组织/权限/群变更等）。
+//
+// 始终下发：
+//   - HasReadReceipt / MsgRevokeNotification / DeleteMsgsNotification（已读、撤回、删除）
+//   - GroupCreated / MemberInvited / MemberEnter / GroupDismissed（建群/入群/解散）
+//   - 普通用户消息
+//
+// 不下发：其余系统通知（组织/权限变更等），避免刷屏。
+//
+// dawn 2026-07-09 修"组织后台/App 建群后消息列表不出现群"：
+// online_history_msg_handler.categorizeMessageLists 用
+//   IsSendMsg && ShouldDeliverSystemMsgToChat
+// 决定是否把通知 clone 成聊天消息进 storageMsgList。
+// 只有 storageMsgList → handleMsg 才会：
+//   1) 写入 sg_<groupID> 会话消息并分配 seq
+//   2) isNewConversation 时调用 CreateGroupChatConversations
+// 原先白名单只有已读/撤回/删除，GroupCreated(1501) 等一律 false，
+// 导致即使 isSendMsg=true + history=true，通知只进 n_<gid> 通知通道，
+// 永远不建 sg_ 会话 → 客户端消息列表看不到新群，要有人发第一条真实消息才出现。
+// 线上实测群 3200041810(666)：history/persistent 已 true，但 conversationID=n_3200041810，
+// conversation 表 0 行、sg_ seq 不存在。
 func ShouldDeliverSystemMsgToChat(msg *sdkws.MsgData) bool {
 	if msg == nil {
 		return true
@@ -165,6 +184,12 @@ func ShouldDeliverSystemMsgToChat(msg *sdkws.MsgData) bool {
 	case constant.HasReadReceipt:
 		return true
 	case constant.MsgRevokeNotification, constant.DeleteMsgsNotification:
+		return true
+	// 建群 / 被拉入群 / 入群 / 解散：必须进聊天会话，否则客户端无从建会话行
+	case constant.GroupCreatedNotification,
+		constant.MemberInvitedNotification,
+		constant.MemberEnterNotification,
+		constant.GroupDismissedNotification:
 		return true
 	default:
 		return false
