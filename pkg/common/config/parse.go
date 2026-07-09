@@ -82,6 +82,17 @@ func GetOptionsByNotification(cfg NotificationConfig, sendMessage *bool) msgproc
 		// 行为上至少要和 NoMsg 一致 —— 存历史 + 持久化，让接收方 sync 时能拿到。
 		opts = msgprocessor.WithOptions(opts, msgprocessor.WithHistory(true), msgprocessor.WithPersistent())
 	}
+	// dawn 2026-07-09 修"建群/拉人进群后客户端不显示会话，要发一条消息会话才出现"(#14)：
+	// isSendMsg=true 语义是"这条通知要作为消息出现在会话里"；但 reliabilityLevel 被上游固定为 1
+	// (UnreliableNotification)，上面的 switch 命中空分支 → 拿不到 WithHistory/WithPersistent →
+	// 通知不存历史、不持久化 → 不落 msg、不分配 seq → 接收端 sync 不到任何消息，也就无从建会话，
+	// 于是新群一直到有人发第一条真实消息(分配 seq=1)才出现在会话列表里。
+	// 实测佐证：新建群 sg_<gid> 的 seq 为 null、msg 文档数为 0。
+	// "要作为消息展示"就必须存储，否则接收端拿不到。故 isSendMsg=true 时补上 WithHistory+WithPersistent，
+	// 与 2026-04-27 修"撤回通知不下发"是同一类问题、同一处修法。
+	if cfg.IsSendMsg {
+		opts = msgprocessor.WithOptions(opts, msgprocessor.WithHistory(true), msgprocessor.WithPersistent())
+	}
 	opts = msgprocessor.WithOptions(opts, msgprocessor.WithSendMsg(cfg.IsSendMsg))
 
 	return opts
