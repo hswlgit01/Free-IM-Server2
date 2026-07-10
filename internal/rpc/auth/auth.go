@@ -56,7 +56,14 @@ type authServer struct {
 	RegisterCenter discovery.Conn
 	config         *Config
 	userClient     *rpcli.UserClient
+	kickGateway    gatewayKickFunc
 }
+
+type gatewayKickFunc func(
+	ctx context.Context,
+	conn grpc.ClientConnInterface,
+	req *msggateway.KickUserOfflineReq,
+) error
 
 type Config struct {
 	RpcConfig   config.Auth
@@ -266,44 +273,82 @@ func (s *authServer) BatchForceLogout(ctx context.Context, req *pbauth.BatchForc
 		}
 	}
 
-	// 如果有错误发生，记录但不返回错误，确保其他用户的登出操作能够继续
+	// Process every item, then return the aggregate so callers do not mistake a
+	// partial gateway/token-cache failure for a successful force logout.
 	if len(errs) > 0 {
 		log.ZWarn(ctx, "BatchForceLogout completed with some errors", errors.New("partial failures"), "total_items", len(req.Items), "failed_count", len(errs))
+		return nil, errors.Join(errs...)
 	}
 
 	return &pbauth.BatchForceLogoutResp{}, nil
 }
 
 func (s *authServer) forceKickOff(ctx context.Context, userID string, platformID int32) error {
+	var forceLogoutErrs []error
+
 	conns, err := s.RegisterCenter.GetConns(ctx, s.config.Discovery.RpcService.MessageGateway)
 	if err != nil {
-		return err
-	}
-	for _, v := range conns {
-		log.ZDebug(ctx, "forceKickOff", "userID", userID, "platformID", platformID)
-		client := msggateway.NewMsgGatewayClient(v)
+		forceLogoutErrs = append(forceLogoutErrs, fmt.Errorf("get message gateway connections: %w", err))
+	} else {
+		kickGateway := s.kickGateway
+		if kickGateway == nil {
+			kickGateway = func(ctx context.Context, conn grpc.ClientConnInterface, req *msggateway.KickUserOfflineReq) error {
+				_, err := msggateway.NewMsgGatewayClient(conn).KickUserOffline(ctx, req)
+				return err
+			}
+		}
 		kickReq := &msggateway.KickUserOfflineReq{KickUserIDList: []string{userID}, PlatformID: platformID}
-		_, err := client.KickUserOffline(ctx, kickReq)
-		if err != nil {
-			log.ZError(ctx, "forceKickOff", err, "kickReq", kickReq)
+		if err := kickUserOfflineOnGateways(ctx, conns, kickReq, kickGateway); err != nil {
+			log.ZError(ctx, "forceKickOff gateway broadcast failed", err,
+				"userID", userID, "platformID", platformID)
+			forceLogoutErrs = append(forceLogoutErrs, err)
 		}
 	}
 
-	m, err := s.authDatabase.GetTokensWithoutError(ctx, userID, int(platformID))
-	if err != nil && !errors.Is(err, redis.Nil) {
+	if err := markPlatformTokensKicked(ctx, s.authDatabase, userID, platformID); err != nil {
+		log.ZError(ctx, "forceKickOff token invalidation failed", err,
+			"userID", userID, "platformID", platformID)
+		forceLogoutErrs = append(forceLogoutErrs, err)
+	}
+
+	return errors.Join(forceLogoutErrs...)
+}
+
+func kickUserOfflineOnGateways(
+	ctx context.Context,
+	conns []grpc.ClientConnInterface,
+	req *msggateway.KickUserOfflineReq,
+	kick gatewayKickFunc,
+) error {
+	var kickErrs []error
+	for i, conn := range conns {
+		if err := kick(ctx, conn, req); err != nil {
+			kickErrs = append(kickErrs, fmt.Errorf("message gateway %d: %w", i, err))
+		}
+	}
+	return errors.Join(kickErrs...)
+}
+
+func markPlatformTokensKicked(
+	ctx context.Context,
+	database controller.AuthDatabase,
+	userID string,
+	platformID int32,
+) error {
+	m, err := database.GetTokensWithoutError(ctx, userID, int(platformID))
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil
+		}
 		return err
+	}
+	if len(m) == 0 {
+		return nil
 	}
 	for k := range m {
 		m[k] = constant.KickedToken
-		log.ZDebug(ctx, "set token map is ", "token map", m, "userID",
-			userID, "token", k)
-
-		err = s.authDatabase.SetTokenMapByUidPid(ctx, userID, int(platformID), m)
-		if err != nil {
-			return err
-		}
 	}
-	return nil
+	return database.SetTokenMapByUidPid(ctx, userID, int(platformID), m)
 }
 
 func (s *authServer) InvalidateToken(ctx context.Context, req *pbauth.InvalidateTokenReq) (*pbauth.InvalidateTokenResp, error) {

@@ -78,6 +78,7 @@ type msgServer struct {
 	webhookClient          *webhook.Client
 	conversationClient     *rpcli.ConversationClient
 	mongoDatabase          *mongo.Database // organization_role_permission（发送文件/名片）
+	callProtectionChecker  callProtectionChecker
 }
 
 func (m *msgServer) addInterceptorHandler(interceptorFunc ...MessageInterceptorFunc) {
@@ -164,6 +165,7 @@ func Start(ctx context.Context, config *Config, client discovery.Conn, server gr
 		config:                 config,
 		webhookClient:          webhook.NewWebhookClient(config.WebhooksConfig.URL),
 		conversationClient:     conversationClient,
+		callProtectionChecker:  newChatCallProtectionChecker(config.Share.ChatAPIURL, config.Share.Secret),
 	}
 
 	s.notificationSender = notification.NewNotificationSender(&config.NotificationConfig, notification.WithLocalSendMsg(s.SendMsg))

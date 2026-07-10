@@ -21,6 +21,13 @@ func (x *AuthClient) KickTokens(ctx context.Context, tokens []string) error {
 	return ignoreResp(x.AuthClient.KickTokens(ctx, &auth.KickTokensReq{Tokens: tokens}))
 }
 
+func (x *AuthClient) ForceLogout(ctx context.Context, userID string, platformID int32) error {
+	return ignoreResp(x.AuthClient.ForceLogout(ctx, &auth.ForceLogoutReq{
+		UserID:     userID,
+		PlatformID: platformID,
+	}))
+}
+
 func (x *AuthClient) InvalidateToken(ctx context.Context, req *auth.InvalidateTokenReq) error {
 	return ignoreResp(x.AuthClient.InvalidateToken(ctx, req))
 }

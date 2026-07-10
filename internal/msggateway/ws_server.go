@@ -62,7 +62,15 @@ type WsServer struct {
 	MessageHandler
 	webhookClient *webhook.Client
 	userClient    *rpcli.UserClient
-	authClient    *rpcli.AuthClient
+	authClient    wsAuthClient
+	cityChecker   loginCityChecker
+}
+
+type wsAuthClient interface {
+	ParseToken(ctx context.Context, token string) (*pbAuth.ParseTokenResp, error)
+	ForceLogout(ctx context.Context, userID string, platformID int32) error
+	KickTokens(ctx context.Context, tokens []string) error
+	InvalidateToken(ctx context.Context, req *pbAuth.InvalidateTokenReq) error
 }
 
 type kickHandler struct {
@@ -151,6 +159,7 @@ func NewWsServer(msgGatewayConfig *Config, opts ...Option) *WsServer {
 		subscription:    newSubscription(),
 		Compressor:      NewGzipCompressor(),
 		webhookClient:   webhook.NewWebhookClient(msgGatewayConfig.WebhooksConfig.URL),
+		cityChecker:     newChatLoginCityChecker(msgGatewayConfig.Share.ChatAPIURL, msgGatewayConfig.Share.Secret),
 	}
 }
 
@@ -419,6 +428,76 @@ func (ws *WsServer) validateRespWithRequest(ctx *UserConnContext, resp *pbAuth.P
 	return nil
 }
 
+func (ws *WsServer) enforceLoginCity(ctx *UserConnContext) error {
+	if ws.cityChecker == nil {
+		return nil
+	}
+
+	clientIP := clientIPFromRequest(ctx.Req)
+	operationID := ctx.GetOperationID()
+	if operationID == "" {
+		operationID = "ws_city_" + ctx.GetConnID()
+	}
+	result, err := ws.cityChecker.Check(ctx, ctx.GetUserID(), clientIP, operationID)
+	if err != nil {
+		log.ZWarn(ctx, "websocket login city check failed; allowing connection", err,
+			"userID", ctx.GetUserID(), "clientIP", clientIP)
+		return nil
+	}
+	if result == nil || result.Allowed {
+		return nil
+	}
+
+	// Close any same-token connection on this node immediately. ForceLogout
+	// below handles all platforms/nodes, while this local path guarantees that
+	// a partial discovery or gateway RPC failure cannot leave the old socket up.
+	ws.kickLocalTokenConnections(ctx.GetUserID(), ctx.GetToken())
+
+	var forceLogoutErr error
+	if len(ws.msgGatewayConfig.Share.IMAdminUserID) == 0 {
+		forceLogoutErr = fmt.Errorf("IM admin user ID is not configured")
+	} else {
+		adminCtx := mcontext.WithOpUserIDContext(ctx, ws.msgGatewayConfig.Share.IMAdminUserID[0])
+		forceLogoutCtx, cancel := context.WithTimeout(adminCtx, loginCityForceLogoutTimeout)
+		forceLogoutErr = ws.authClient.ForceLogout(
+			forceLogoutCtx,
+			ctx.GetUserID(),
+			stringutil.StringToInt32(ctx.GetPlatformID()),
+		)
+		cancel()
+	}
+	if forceLogoutErr != nil {
+		log.ZError(ctx, "force logout after websocket login city mismatch failed; using local fallback",
+			forceLogoutErr, "userID", ctx.GetUserID(), "clientIP", clientIP)
+		kickTokenCtx, cancel := context.WithTimeout(ctx, loginCityForceLogoutTimeout)
+		if err := ws.authClient.KickTokens(kickTokenCtx, []string{ctx.GetToken()}); err != nil {
+			log.ZError(ctx, "failed to invalidate token after websocket login city mismatch", err,
+				"userID", ctx.GetUserID(), "clientIP", clientIP)
+		}
+		cancel()
+	}
+	log.ZWarn(ctx, "websocket connection rejected because login city changed", servererrs.ErrTokenKicked,
+		"userID", ctx.GetUserID(), "clientIP", clientIP, "reason", result.Reason,
+		"currentCity", result.CurrentCity, "boundCity", result.BoundCity)
+	return servererrs.ErrTokenKicked.WrapMsg("websocket login city mismatch")
+}
+
+func (ws *WsServer) kickLocalTokenConnections(userID, token string) {
+	clients, ok := ws.clients.GetAll(userID)
+	if !ok {
+		return
+	}
+	for _, client := range append([]*Client(nil), clients...) {
+		if client.token != token {
+			continue
+		}
+		if err := client.KickOnlineMessage(); err != nil {
+			log.ZWarn(client.ctx, "failed to kick local connection after websocket login city mismatch", err,
+				"userID", userID, "platformID", client.PlatformID)
+		}
+	}
+}
+
 func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a new connection context
 	connContext := newContext(w, r)
@@ -462,6 +541,21 @@ func (ws *WsServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	err = ws.validateRespWithRequest(connContext, resp)
 	if err != nil {
 		// If validation fails, return an error via HTTP and stop processing
+		httpError(connContext, err)
+		return
+	}
+
+	// Reconnects reuse a previously issued IM token, so login-time checks alone
+	// cannot detect an IP/city change. Check immediately before the WebSocket
+	// upgrade; only an explicit city-mismatch response is fail-closed.
+	if err = ws.enforceLoginCity(connContext); err != nil {
+		shouldSendError := connContext.ShouldSendResp()
+		if shouldSendError {
+			wsLongConn := newGWebSocket(WebSocket, ws.handshakeTimeout, ws.writeBufferSize)
+			if err := wsLongConn.RespondWithError(err, w, r); err == nil {
+				return
+			}
+		}
 		httpError(connContext, err)
 		return
 	}

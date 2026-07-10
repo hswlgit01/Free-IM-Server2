@@ -17,10 +17,12 @@ package group
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -133,7 +135,12 @@ func Start(ctx context.Context, config *Config, client discovery.Conn, server gr
 		conversationClient: rpcli.NewConversationClient(conversationConn),
 		mongoCli:           mgocli,
 		groupOpLogDB:       controller.NewGroupOperationLogController(groupOpLogDB),
-		httpClient:         &http.Client{Timeout: 3 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 3 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 
 	gs.db = controller.NewGroupDatabase(rdb, &config.LocalCacheConfig, groupDB, groupMemberDB, groupRequestDB, mgocli.GetTx(), grouphash.NewGroupHashFromGroupServer(&gs))
@@ -642,10 +649,13 @@ func (g *groupServer) KickGroupMember(ctx context.Context, req *pbgroup.KickGrou
 
 	// 检查被踢用户是否拥有官方账号保护权限
 	for _, kickedUserID := range req.KickedUserIDs {
-		hasProtection, _ := g.checkUserHasOfficialProtection(ctx, kickedUserID)
+		hasProtection, err := g.checkUserHasOfficialProtection(ctx, kickedUserID)
+		if err != nil {
+			return nil, err
+		}
 		if hasProtection {
 			log.ZError(ctx, "官方保护账号不能被移出群组", nil, "userID", kickedUserID, "groupID", req.GroupID)
-			return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("官方客服账号不能被移出群组")
+			return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("已开启官方账号保护的用户不能被移出群组")
 		}
 	}
 
@@ -1590,10 +1600,13 @@ func shouldCleanupDismissedGroupMembersAfterNotification(req *pbgroup.DismissGro
 
 func (g *groupServer) MuteGroupMember(ctx context.Context, req *pbgroup.MuteGroupMemberReq) (*pbgroup.MuteGroupMemberResp, error) {
 	// 检查被禁言用户是否拥有官方账号保护权限
-	hasProtection, _ := g.checkUserHasOfficialProtection(ctx, req.UserID)
+	hasProtection, err := g.checkUserHasOfficialProtection(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
 	if hasProtection {
 		log.ZError(ctx, "官方保护账号不能被禁言", nil, "userID", req.UserID, "groupID", req.GroupID)
-		return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("官方客服账号不能被禁言")
+		return nil, servererrs.ErrOfficialAccountProtected.WrapMsg("已开启官方账号保护的用户不能被禁言")
 	}
 
 	member, err := g.db.TakeGroupMember(ctx, req.GroupID, req.UserID)
@@ -2124,38 +2137,45 @@ func (g *groupServer) checkUserHasOfficialProtection(ctx context.Context, userID
 		chatAPIURL = "http://127.0.0.1:10008"
 	}
 
-	url := fmt.Sprintf("%s/third_admin/organization/internal/check_user_protection?user_id=%s", chatAPIURL, userID)
-	req, err := http.NewRequest("GET", url, nil)
+	endpoint := fmt.Sprintf("%s/third_admin/organization/internal/check_user_protection?user_id=%s",
+		strings.TrimRight(chatAPIURL, "/"), url.QueryEscape(userID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("create official protection request: %w", err)
 	}
 
 	req.Header.Set("operationID", fmt.Sprintf("check_protection_%s_%d", userID, time.Now().Unix()))
+	if g.config.Share.Secret != "" {
+		req.Header.Set("X-Internal-Secret", g.config.Share.Secret)
+	}
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("check official protection: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, nil
+		return false, fmt.Errorf("check official protection returned HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {
 		ErrCode int `json:"errCode"`
-		Data    struct {
-			HasProtection bool `json:"has_protection"`
+		Data    *struct {
+			HasProtection *bool `json:"has_protection"`
 		} `json:"data"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, nil
+		return false, fmt.Errorf("decode official protection response: %w", err)
 	}
 
 	if result.ErrCode != 0 {
-		return false, nil
+		return false, fmt.Errorf("check official protection returned errCode %d", result.ErrCode)
+	}
+	if result.Data == nil || result.Data.HasProtection == nil {
+		return false, errors.New("check official protection returned incomplete data")
 	}
 
-	return result.Data.HasProtection, nil
+	return *result.Data.HasProtection, nil
 }

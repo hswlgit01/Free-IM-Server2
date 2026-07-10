@@ -32,7 +32,7 @@ func (x *ForceLogoutReq) Check() error {
 	if x.UserID == "" {
 		return errors.New("userID is empty")
 	}
-	if x.PlatformID > constant.AdminPlatformID || x.PlatformID < constant.IOSPlatformID {
+	if x.PlatformID > constant.H5WebPlatformID || x.PlatformID < constant.IOSPlatformID {
 		return errors.New("platformID is invalidate")
 	}
 	return nil
@@ -64,7 +64,7 @@ func (x *BatchForceLogoutReq) Check() error {
 		if item.UserID == "" {
 			return fmt.Errorf("item[%d].userID is empty", i)
 		}
-		if item.PlatformID > constant.AdminPlatformID || item.PlatformID < constant.IOSPlatformID {
+		if item.PlatformID > constant.H5WebPlatformID || item.PlatformID < constant.IOSPlatformID {
 			return fmt.Errorf("item[%d].platformID is invalid", i)
 		}
 	}

@@ -151,6 +151,9 @@ func (m *msgServer) preflightSingleChatMsg(ctx context.Context, data *pbmsg.Send
 	if data.MsgData.ContentType >= constant.NotificationBegin && data.MsgData.ContentType <= constant.NotificationEnd {
 		return nil
 	}
+	if err := m.checkCallInviteProtection(ctx, data.MsgData); err != nil {
+		return err
+	}
 	if err := m.checkOrgContentSendPermission(ctx, data.MsgData); err != nil {
 		return err
 	}
