@@ -34,6 +34,9 @@ type MsgTransferDatabase interface {
 
 	// to mq
 	MsgToPushMQ(ctx context.Context, key, conversationID string, msg2mq *sdkws.MsgData) error
+	// MsgToPushMQBatch 把同一个会话的一批消息作为**一条** MQ 消息投递到 toPush。
+	// 原来是 batcher 攒够 1000 条、再逐条 produce 1000 次，MQ 消息数和消息条数是 1:1。
+	MsgToPushMQBatch(ctx context.Context, key, conversationID string, msgs []*sdkws.MsgData) error
 	MsgToMongoMQ(ctx context.Context, key, conversationID string, msgs []*sdkws.MsgData, lastSeq int64) error
 }
 
@@ -273,13 +276,13 @@ func (db *msgTransferDatabase) SetHasReadSeqs(ctx context.Context, conversationI
 	return nil
 }
 
+// SetHasReadSeqToDB 把一批用户的已读 seq 落库。
+//
+// 原来是 for 循环逐用户调 SetUserReadSeqToDB，而 Mongo 侧每个用户又是「1 次读 + 1 次 upsert」，
+// msgtransfer 一批 1000 条不同发送者的消息就是 2000 次串行往返。
+// 现在改成一次 BulkWrite（$max 保证只前进不后退）。
 func (db *msgTransferDatabase) SetHasReadSeqToDB(ctx context.Context, conversationID string, userSeqMap map[string]int64) error {
-	for userID, seq := range userSeqMap {
-		if err := db.seqUser.SetUserReadSeqToDB(ctx, conversationID, userID, seq); err != nil {
-			return err
-		}
-	}
-	return nil
+	return db.seqUser.SetUserReadSeqToDBBatch(ctx, conversationID, userSeqMap)
 }
 
 func (db *msgTransferDatabase) MsgToPushMQ(ctx context.Context, key, conversationID string, msg2mq *sdkws.MsgData) error {
@@ -289,6 +292,28 @@ func (db *msgTransferDatabase) MsgToPushMQ(ctx context.Context, key, conversatio
 	}
 	if err := db.producerToPush.SendMessage(ctx, key, data); err != nil {
 		log.ZError(ctx, "MsgToPushMQ", err, "key", key, "conversationID", conversationID)
+		return err
+	}
+	return nil
+}
+
+// MsgToPushMQBatch 批量投递到 toPush。
+//
+// 复用 MsgDataToMongoByMQ 这个已有的结构体（它本来就是 {conversationID, repeated MsgData}），
+// 是为了不必重新生成 protobuf 代码。lastSeq 刻意留空：
+// 老版本 push 消费端把它当 PushMsgDataToMQ 解析时，字段 1(lastSeq, varint) 与
+// msgData(length-delimited) 线型不符会直接报错，反而能被识别出来——
+// 消费端据此区分新旧两种格式。
+func (db *msgTransferDatabase) MsgToPushMQBatch(ctx context.Context, key, conversationID string, msgs []*sdkws.MsgData) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	data, err := proto.Marshal(&pbmsg.MsgDataToMongoByMQ{ConversationID: conversationID, MsgData: msgs})
+	if err != nil {
+		return err
+	}
+	if err := db.producerToPush.SendMessage(ctx, key, data); err != nil {
+		log.ZError(ctx, "MsgToPushMQBatch", err, "key", key, "conversationID", conversationID, "count", len(msgs))
 		return err
 	}
 	return nil

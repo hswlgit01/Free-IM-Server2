@@ -16,6 +16,7 @@ import (
 	"github.com/openimsdk/open-im-server/v3/pkg/util/conversationutil"
 	"github.com/openimsdk/open-im-server/v3/protocol/constant"
 	"github.com/openimsdk/open-im-server/v3/protocol/msggateway"
+	pbmsg "github.com/openimsdk/open-im-server/v3/protocol/msg"
 	pbpush "github.com/openimsdk/open-im-server/v3/protocol/push"
 	"github.com/openimsdk/open-im-server/v3/protocol/sdkws"
 	"github.com/openimsdk/tools/discovery"
@@ -93,10 +94,27 @@ func NewConsumerHandler(ctx context.Context, config *Config, database controller
 	return &consumerHandler, nil
 }
 
+// HandleMs2PsChat 消费 toPush。
+//
+// msgtransfer 现在把同一会话的一批消息合成**一条** MQ 消息投递（见 MsgToPushMQBatch），
+// 但要兼容滚动发布期间可能残留的旧格式单条消息，所以这里先按批量格式解析：
+//   - 批量信封用的是 MsgDataToMongoByMQ{conversationID, repeated msgData}，且不填 lastSeq
+//   - 旧格式 PushMsgDataToMQ 的字段 1 是 msgData(length-delimited)，
+//     按批量格式解析时会与 lastSeq(varint) 线型冲突而报错，据此可靠区分
 func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
+	var batch pbmsg.MsgDataToMongoByMQ
+	if err := proto.Unmarshal(msg, &batch); err == nil && len(batch.MsgData) > 0 {
+		c.handleBatch(ctx, batch.ConversationID, batch.MsgData)
+		return
+	}
+
 	msgFromMQ := pbpush.PushMsgReq{}
 	if err := proto.Unmarshal(msg, &msgFromMQ); err != nil {
 		log.ZError(ctx, "push Unmarshal msg err", err, "msg", string(msg))
+		return
+	}
+	if msgFromMQ.MsgData == nil {
+		log.ZWarn(ctx, "push msg data is nil, skip", nil)
 		return
 	}
 
@@ -166,6 +184,119 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 	if err != nil {
 		log.ZError(ctx, "Push failed", err, "msg", msgFromMQ.String())
 	}
+}
+
+// isStaleMsg 与单条路径一致的「过期消息」判断：超过 30 秒的非重要消息直接丢弃，
+// 避免大量过期消息继续占用推送资源。
+func (c *ConsumerHandler) isStaleMsg(ctx context.Context, msg *sdkws.MsgData) bool {
+	if timeutil.GetCurrentTimestampBySecond()-msg.SendTime/1000 <= 30 {
+		return false
+	}
+	if msg.ContentType <= constant.Text || msg.ContentType == constant.SignalingNotification {
+		prommetrics.MsgLoneTimePushCounter.Inc()
+		return false
+	}
+	log.ZInfo(ctx, "丢弃延迟过高的非重要消息", "content_type", msg.ContentType, "session_type", msg.SessionType)
+	return true
+}
+
+// needsPerMsgGroupHandling 判断这条群消息是否必须走完整的 groupMessagesHandler。
+// 退群/被踢/解散这几类通知带有副作用（改会话 seq、解散群），且会往推送名单里追加
+// 已经不在群里的人，不能复用批内共享的成员列表。
+func needsPerMsgGroupHandling(msg *sdkws.MsgData) bool {
+	switch msg.ContentType {
+	case constant.MemberQuitNotification,
+		constant.MemberKickedNotification,
+		constant.GroupDismissedNotification:
+		return true
+	}
+	return false
+}
+
+// handleBatch 处理一批同会话的消息。
+//
+// 【性能】关键收益在于：整批只解析一次 MQ 消息、群成员只取一次。
+// 原来 N 条消息就是 N 次 Kafka poll + N 次解包 + N 次取群成员。
+// 网关下发仍然是每条一次——msggateway 的接口本身就是按单条消息定义的，
+// 要合并得改网关协议，那属于 P2 范围。
+func (c *ConsumerHandler) handleBatch(ctx context.Context, conversationID string, msgs []*sdkws.MsgData) {
+	kept := make([]*sdkws.MsgData, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil || c.isStaleMsg(ctx, m) {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	if len(kept) == 0 {
+		return
+	}
+
+	first := kept[0]
+	if first.SessionType == constant.ReadGroupChatType && first.GroupID != "" {
+		// 整批只取一次群成员
+		members, err := c.groupLocalCache.GetGroupMemberIDs(ctx, first.GroupID)
+		if err != nil {
+			log.ZWarn(ctx, "batch push: get group member ids failed, fallback per-msg", err, "groupID", first.GroupID)
+			members = nil
+		}
+		for _, m := range kept {
+			if m.GroupID != first.GroupID || needsPerMsgGroupHandling(m) || len(members) == 0 {
+				if err := c.Push2Group(ctx, m.GroupID, m); err != nil {
+					log.ZError(ctx, "batch push: Push2Group failed", err, "groupID", m.GroupID)
+				}
+				continue
+			}
+			if err := c.push2GroupWithMembers(ctx, m.GroupID, m, members); err != nil {
+				log.ZError(ctx, "batch push: push2GroupWithMembers failed", err, "groupID", m.GroupID)
+			}
+		}
+		log.ZDebug(ctx, "batch push done", "conversationID", conversationID, "count", len(kept), "members", len(members))
+		return
+	}
+
+	// 单聊/通知：没有群成员可复用，逐条走原路径，但仍然省下了 N-1 次 MQ 解包
+	for _, m := range kept {
+		var pushUserIDList []string
+		isSenderSync := datautil.GetSwitchFromOptions(m.Options, constant.IsSenderSync)
+		if !isSenderSync || m.SendID == m.RecvID {
+			pushUserIDList = append(pushUserIDList, m.RecvID)
+		} else {
+			pushUserIDList = append(pushUserIDList, m.RecvID, m.SendID)
+		}
+		if err := c.Push2User(ctx, pushUserIDList, m); err != nil {
+			log.ZError(ctx, "batch push: Push2User failed", err, "recvID", m.RecvID)
+		}
+	}
+}
+
+// push2GroupWithMembers 与 Push2Group 相同，但直接使用调用方already解析好的群成员列表，
+// 省掉每条消息一次的成员查询。
+func (c *ConsumerHandler) push2GroupWithMembers(ctx context.Context, groupID string, msg *sdkws.MsgData, members []string) error {
+	pushToUserIDs := members
+	if err := c.webhookBeforeGroupOnlinePush(ctx, &c.config.WebhooksConfig.BeforeGroupOnlinePush, groupID, msg,
+		&pushToUserIDs); err != nil {
+		return err
+	}
+	if len(pushToUserIDs) == 0 {
+		return nil
+	}
+
+	wsResults, err := c.GetConnsAndOnlinePush(ctx, msg, pushToUserIDs)
+	if err != nil {
+		return err
+	}
+	if !c.shouldPushOffline(ctx, msg) {
+		return nil
+	}
+	needOfflinePushUserIDs := c.onlinePusher.GetOnlinePushFailedUserIDs(ctx, msg, wsResults, &pushToUserIDs)
+	needOfflinePushUserIDs, err = c.filterGroupMessageOfflinePush(ctx, groupID, msg, needOfflinePushUserIDs)
+	if err != nil {
+		return err
+	}
+	if len(needOfflinePushUserIDs) > 0 {
+		c.asyncOfflinePush(ctx, needOfflinePushUserIDs, msg)
+	}
+	return nil
 }
 
 // 高优先级消息推送到用户
