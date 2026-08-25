@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strconv"
 
 	"sync"
 	"time"
@@ -41,19 +43,38 @@ import (
 )
 
 const (
-	// 批处理大小，增加到1000提高吞吐量
+	// 批处理大小，攒够这么多条就触发一次处理
 	size = 1000
-	// 主缓冲区大小，增加到2000提高消息处理容量
-	mainDataBuffer = 2000
-	// 子通道缓冲区大小，增加到200以减少阻塞
+	// 子通道缓冲区大小
 	subChanBuffer = 200
-	// 工作线程数，增加到100以提高并发处理能力
-	worker = 100
 	// 处理间隔保持不变，更低的值会增加CPU使用率
 	interval = 100 * time.Millisecond
-	// 已读通道缓冲区大小，增加到10000以处理更多的已读消息
+	// 已读通道缓冲区大小
 	hasReadChanBuffer = 10000
 )
+
+// worker / mainDataBuffer 决定了 msgtransfer 会用多大并发去打 Redis 和 MongoDB。
+//
+// 【重要】这两个值原来分别是 100 和 2000，注释写的是「提高并发处理能力」。
+// 但 msgtransfer 的下游是数据库，把并发拉满等于把 MQ 的积压原样转嫁给数据库——
+// MQ 堆积不致命，数据库被打爆才致命。压测中 MongoDB CPU 被打到 330%（共 4 核）
+// 正是这个方向的结果。
+//
+// 现在默认降到 32，并且可以按机器规格用环境变量调：
+//   MSGTRANSFER_WORKER、MSGTRANSFER_DATA_BUFFER
+var (
+	worker         = envInt("MSGTRANSFER_WORKER", 32)
+	mainDataBuffer = envInt("MSGTRANSFER_DATA_BUFFER", 512)
+)
+
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
 
 type ContextMsg struct {
 	message *sdkws.MsgData
@@ -375,12 +396,40 @@ func (och *OnlineHistoryRedisConsumerHandler) Close() {
 	och.wg.Wait()
 }
 
+// toPushTopic 把一批消息投递到 toPush。
+//
+// 【性能】原来是对 batcher 攒出来的每一条消息各 produce 一次，
+// batcher 好不容易把 1000 条聚成一批，到这里又拆成 1000 次 Kafka produce，
+// 下游 push 消费端也就要逐条 poll、逐条解包、逐条取群成员、逐条查会话免打扰。
+// 现在整批发一条：MQ 消息数从「每条消息一条」降到「每批一条」。
+//
+// 同一批消息的 conversationID 相同（batcher 按会话分片），所以可以安全合并。
+// 通过 PUSH_BATCH_DISABLE=1 可以退回逐条模式做对照。
 func (och *OnlineHistoryRedisConsumerHandler) toPushTopic(ctx context.Context, key, conversationID string, msgs []*ContextMsg) {
-	for _, v := range msgs {
-		if err := och.msgTransferDatabase.MsgToPushMQ(v.ctx, key, conversationID, v.message); err != nil {
-			log.ZError(ctx, "MsgToPushMQ error", err, "msg", v.message.String())
-		}
+	if len(msgs) == 0 {
+		return
 	}
+	if pushBatchDisabled() {
+		for _, v := range msgs {
+			if err := och.msgTransferDatabase.MsgToPushMQ(v.ctx, key, conversationID, v.message); err != nil {
+				log.ZError(ctx, "MsgToPushMQ error", err, "msg", v.message.String())
+			}
+		}
+		return
+	}
+
+	batch := make([]*sdkws.MsgData, 0, len(msgs))
+	for _, v := range msgs {
+		batch = append(batch, v.message)
+	}
+	// 用批内第一条消息的 ctx，保留 operationID 便于串起链路日志
+	if err := och.msgTransferDatabase.MsgToPushMQBatch(msgs[0].ctx, key, conversationID, batch); err != nil {
+		log.ZError(ctx, "MsgToPushMQBatch error", err, "conversationID", conversationID, "count", len(batch))
+	}
+}
+
+func pushBatchDisabled() bool {
+	return os.Getenv("PUSH_BATCH_DISABLE") == "1"
 }
 
 func withAggregationCtx(ctx context.Context, values []*ContextMsg) context.Context {

@@ -6,6 +6,7 @@ import (
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
 	"github.com/openimsdk/open-im-server/v3/tools/db/mongoutil"
+	"github.com/openimsdk/tools/errs"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -27,6 +28,47 @@ func NewSeqUserMongo(db *mongo.Database) (database.SeqUser, error) {
 
 type seqUserMongo struct {
 	coll *mongo.Collection
+}
+
+// SetUserReadSeqBatch 用一次 BulkWrite 写入同一会话下多个用户的已读 seq。
+//
+// 逐用户版本 SetUserReadSeq 是「先 GetUserReadSeq 读一次、比大小、再 upsert 一次」，
+// msgtransfer 一批 1000 条消息若来自 1000 个不同发送者，就是 2000 次串行往返。
+//
+// 这里用 $max 让「只前进不后退」的语义由 MongoDB 原子完成，
+// 既省掉那次读，也顺带修掉了原来「读-比-写」之间的竞态。
+func (s *seqUserMongo) SetUserReadSeqBatch(ctx context.Context, conversationID string, userSeqMap map[string]int64) error {
+	if len(userSeqMap) == 0 {
+		return nil
+	}
+	models := make([]mongo.WriteModel, 0, len(userSeqMap))
+	for userID, seq := range userSeqMap {
+		if seq < 0 {
+			continue
+		}
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"user_id": userID, "conversation_id": conversationID}).
+			SetUpdate(bson.M{
+				// $max：仅当新值更大时才写入，语义等价于原来的「dbSeq < seq 才写」
+				"$max": bson.M{"read_seq": seq},
+				"$setOnInsert": bson.M{
+					"user_id":         userID,
+					"conversation_id": conversationID,
+					"min_seq":         0,
+					"max_seq":         0,
+				},
+			}).
+			SetUpsert(true))
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	// 无序执行：各用户之间互不依赖，个别失败不该阻断其余的
+	opt := options.BulkWrite().SetOrdered(false)
+	if _, err := s.coll.BulkWrite(ctx, models, opt); err != nil {
+		return errs.Wrap(err)
+	}
+	return nil
 }
 
 func (s *seqUserMongo) setSeq(ctx context.Context, conversationID string, userID string, seq int64, field string) error {

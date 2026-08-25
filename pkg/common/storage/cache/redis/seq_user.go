@@ -91,6 +91,11 @@ func (s *seqUserCacheRedis) SetUserReadSeqToDB(ctx context.Context, conversation
 	return s.mgo.SetUserReadSeq(ctx, conversationID, userID, seq)
 }
 
+// SetUserReadSeqToDBBatch 同一会话下多个用户的已读 seq 一次写完，替代逐用户串行往返。
+func (s *seqUserCacheRedis) SetUserReadSeqToDBBatch(ctx context.Context, conversationID string, userSeqMap map[string]int64) error {
+	return s.mgo.SetUserReadSeqBatch(ctx, conversationID, userSeqMap)
+}
+
 func (s *seqUserCacheRedis) SetUserMinSeqs(ctx context.Context, userID string, seqs map[string]int64) error {
 	keys := make([]string, 0, len(seqs))
 	for conversationID, seq := range seqs {
