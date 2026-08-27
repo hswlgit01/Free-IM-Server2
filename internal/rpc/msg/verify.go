@@ -125,7 +125,24 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		}
 		// 单聊自发自收已在函数开头统一拒绝，此处仅作冗余校验
 		if m.config.RpcConfig.FriendVerify {
-			friend, err := m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
+			// 【为什么要求双向好友】客户反馈「业务员添加了好友，解除好友以后，
+			// 还是可以继续聊天」。根因不在特权角色，而在这里的单边判断：
+			//
+			//   IsFriend(SendID, RecvID) 问的是「发送方在接收方的好友列表里吗」，
+			//   而 DeleteFriend 只删发起方一侧的记录（按 owner_user_id 过滤）。
+			//
+			// 于是业务员把用户删掉后，用户列表里还留着业务员，
+			// 校验依然通过 —— 谁删的好友，谁反而还能继续发。
+			// 要求两个方向都成立，「解除好友」才对双方都生效。
+			//
+			// 开关 FRIEND_VERIFY_MUTUAL=off 可退回原来的单边判断。
+			var friend bool
+			var err error
+			if mutualFriendRequired() {
+				friend, err = m.FriendLocalCache.IsMutualFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
+			} else {
+				friend, err = m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
+			}
 			if err != nil {
 				return err
 			}
@@ -370,6 +387,20 @@ func (m *msgServer) modifyMessageByUserMessageReceiveOpt(ctx context.Context, us
 //
 // 由环境变量 PRIVILEGED_ROLE_FRIEND_BYPASS 控制，取值 none(默认) / sender / both，
 // 语义见调用处注释。默认 none：特权角色也需为好友，符合「解除好友即不能聊天」的预期。
+// mutualFriendRequired 私聊是否要求双向好友。
+//
+// 默认开启：客户明确要求「解除好友后不能再聊天」，而单边判断做不到这一点。
+// 留开关是因为这会收紧现有行为——若某个部署依赖「对方删了我，我还能发」
+// 的旧语义，可用 FRIEND_VERIFY_MUTUAL=off 退回。
+func mutualFriendRequired() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FRIEND_VERIFY_MUTUAL"))) {
+	case "off", "false", "0":
+		return false
+	default:
+		return true
+	}
+}
+
 func privilegedBypassAllows(senderRole, recvRole string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("PRIVILEGED_ROLE_FRIEND_BYPASS"))) {
 	case "both":

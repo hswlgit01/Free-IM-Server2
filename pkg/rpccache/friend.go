@@ -58,6 +58,26 @@ func (f *FriendLocalCache) IsFriend(ctx context.Context, possibleFriendUserID, u
 	return res.InUser1Friends, nil
 }
 
+// IsMutualFriend 判断两人是否**互为**好友。
+//
+// IsFriend 只看单边：「possibleFriendUserID 是否在 userID 的好友列表里」。
+// 但 DeleteFriend 只删发起方一侧的记录（FriendMgo.Delete 按 owner_user_id 过滤），
+// 于是「谁删的好友，谁反而还能继续发消息」：
+//
+//	A 加了 B，B 也加了 A          -> 两条记录
+//	B 删除 A                     -> 只删掉 (owner=B, friend=A)
+//	B 发给 A：查「B 在 A 列表里吗」-> A 的列表还留着 B -> 放行  ← 客户所报 BUG
+//	A 发给 B：查「A 在 B 列表里吗」-> B 已删掉 A       -> 拦截
+//
+// 要让「解除好友」对双方都生效，就得两个方向都成立才放行。
+func (f *FriendLocalCache) IsMutualFriend(ctx context.Context, possibleFriendUserID, userID string) (val bool, err error) {
+	res, err := f.isFriend(ctx, possibleFriendUserID, userID)
+	if err != nil {
+		return false, err
+	}
+	return res.InUser1Friends && res.InUser2Friends, nil
+}
+
 func (f *FriendLocalCache) isFriend(ctx context.Context, possibleFriendUserID, userID string) (val *relation.IsFriendResp, err error) {
 	log.ZDebug(ctx, "FriendLocalCache isFriend req", "possibleFriendUserID", possibleFriendUserID, "userID", userID)
 	defer func() {
@@ -71,7 +91,11 @@ func (f *FriendLocalCache) isFriend(ctx context.Context, possibleFriendUserID, u
 	return cache.Unmarshal(f.local.GetLink(ctx, cachekey.GetIsFriendKey(possibleFriendUserID, userID), func(ctx context.Context) ([]byte, error) {
 		log.ZDebug(ctx, "FriendLocalCache isFriend rpc", "possibleFriendUserID", possibleFriendUserID, "userID", userID)
 		return cache.Marshal(f.client.FriendClient.IsFriend(ctx, &relation.IsFriendReq{UserID1: userID, UserID2: possibleFriendUserID}))
-	}, cachekey.GetFriendIDsKey(possibleFriendUserID)))
+		// 缓存的是 IsFriendResp，两个方向的标志都在里面，取值同时依赖
+		// **双方**的好友列表。原先只挂了 possibleFriendUserID 一侧，
+		// 导致 userID 那一侧解除好友时本地缓存不失效，要等 TTL 到期才生效
+		// —— 表现就是「刚解除还能再发几句」。两个 key 都挂上。
+	}, cachekey.GetFriendIDsKey(possibleFriendUserID), cachekey.GetFriendIDsKey(userID)))
 }
 
 // IsBlack possibleBlackUserID selfUserID.
