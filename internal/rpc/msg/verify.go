@@ -15,6 +15,8 @@
 package msg
 
 import (
+	"os"
+	"strings"
 	"context"
 	"math/rand"
 	"strconv"
@@ -94,10 +96,24 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) || u.CanSendFreeMsg == constant.MessageFreeLevel || recv.CanSendFreeMsg == constant.MessageFreeLevel {
 			return nil
 		}
-		// Admin / team-leader org roles bypass friend verification: they may DM anyone
-		// directly, and anyone may reply to them (recv-side role also exempts). OrgRole
-		// values mirror chat svc organization_user.go.
-		if isPrivilegedOrgRole(u.OrgRole) || isPrivilegedOrgRole(recv.OrgRole) {
+		// 特权组织角色（SuperAdmin / BackendAdmin / GroupManager / TermManager）
+		// 对好友校验的豁免范围，由 PRIVILEGED_ROLE_FRIEND_BYPASS 控制。
+		//
+		// dawn 2026-08-28 客户反馈「解除好友后仍能继续聊天」属 BUG，故默认改为 none。
+		//
+		// 【为什么做成开关】这条判断已经来回调整两次，且三种模式各自会牺牲一些东西：
+		//   both   —— 原行为：收发任一方为特权角色即双方免校验。
+		//             管理员可主动触达，用户也能回复；但解除好友后仍能聊（即客户所报 BUG）。
+		//   sender —— 仅发送方特权时放行。用户无法主动私聊非好友的管理员，
+		//             也**无法回复**管理员发来的消息（会话变单向），客服流程会受影响。
+		//   none   —— 默认。特权角色同样需要是好友才能私聊，「解除好友」即断绝联系。
+		//             代价：管理员无法主动联系非好友用户。
+		//
+		// 【为什么无法既保留主动触达又禁止解除后聊天】
+		// 校验时「从未是好友」与「曾是好友已解除」是同一种状态 —— 好友记录是硬删除
+		// （FriendMgo.Delete），系统不留历史。要区分需另行记录好友关系历史，
+		// 并在每条私聊消息上多查一次，属于独立改造。
+		if privilegedBypassAllows(u.OrgRole, recv.OrgRole) {
 			return nil
 		}
 		black, err := m.FriendLocalCache.IsBlack(ctx, data.MsgData.SendID, data.MsgData.RecvID)
@@ -348,4 +364,19 @@ func (m *msgServer) modifyMessageByUserMessageReceiveOpt(ctx context.Context, us
 		return true, nil
 	}
 	return true, nil
+}
+
+// privilegedBypassAllows 判断本次单聊是否可豁免好友校验。
+//
+// 由环境变量 PRIVILEGED_ROLE_FRIEND_BYPASS 控制，取值 none(默认) / sender / both，
+// 语义见调用处注释。默认 none：特权角色也需为好友，符合「解除好友即不能聊天」的预期。
+func privilegedBypassAllows(senderRole, recvRole string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PRIVILEGED_ROLE_FRIEND_BYPASS"))) {
+	case "both":
+		return isPrivilegedOrgRole(senderRole) || isPrivilegedOrgRole(recvRole)
+	case "sender":
+		return isPrivilegedOrgRole(senderRole)
+	default: // none
+		return false
+	}
 }
