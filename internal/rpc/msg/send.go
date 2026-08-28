@@ -19,9 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/prommetrics"
-	"github.com/openimsdk/open-im-server/v3/pkg/common/servererrs"
 	"github.com/openimsdk/open-im-server/v3/pkg/msgprocessor"
 	"github.com/openimsdk/open-im-server/v3/pkg/util/conversationutil"
 	"github.com/openimsdk/open-im-server/v3/protocol/constant"
@@ -160,38 +158,11 @@ func (m *msgServer) preflightSingleChatMsg(ctx context.Context, data *pbmsg.Send
 	if data.MsgData.SendID == data.MsgData.RecvID {
 		return errs.ErrNoPermission.WrapMsg("self-to-self messages are not allowed")
 	}
-	u, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.SendID)
-	if err != nil {
-		return err
-	}
-	recv, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.RecvID)
-	if err != nil {
-		return err
-	}
-	if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) ||
-		u.CanSendFreeMsg == constant.MessageFreeLevel ||
-		recv.CanSendFreeMsg == constant.MessageFreeLevel ||
-		isPrivilegedOrgRole(u.OrgRole) ||
-		isPrivilegedOrgRole(recv.OrgRole) {
-		return nil
-	}
-	black, err := m.FriendLocalCache.IsBlack(ctx, data.MsgData.SendID, data.MsgData.RecvID)
-	if err != nil {
-		return err
-	}
-	if black {
-		return servererrs.ErrBlockedByPeer.Wrap()
-	}
-	if m.config.RpcConfig.FriendVerify {
-		friend, err := m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
-		if err != nil {
-			return err
-		}
-		if !friend {
-			return servererrs.ErrNotPeersFriend.Wrap()
-		}
-	}
-	return nil
+	// 收发权限与 messageVerification 共用同一份判断。
+	// 这里原本抄了一份，两处一旦不同步就会出现「改了校验却毫无效果」：
+	// 单聊的 messageVerification 跑在异步 goroutine 里，错误返回不到客户端，
+	// 真正决定成败的是这个同步预检。
+	return m.singleChatSendAllowed(ctx, data.MsgData.SendID, data.MsgData.RecvID)
 }
 
 func (m *msgServer) processGroupChatMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
