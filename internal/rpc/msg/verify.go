@@ -15,6 +15,8 @@
 package msg
 
 import (
+	"os"
+	"strings"
 	"context"
 	"math/rand"
 	"strconv"
@@ -85,38 +87,12 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 		if err := m.webhookBeforeSendSingleMsg(ctx, &m.config.WebhooksConfig.BeforeSendSingleMsg, data); err != nil {
 			return err
 		}
-		u, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.SendID)
-		recv, err := m.UserLocalCache.GetUserInfo(ctx, data.MsgData.RecvID)
-		if err != nil {
+		// 单聊的收发权限判断统一放在 singleChatSendAllowed 里。
+		// 之前这段逻辑在这里和 preflightSingleChatMsg 里各有一份，
+		// 结果修好友校验时只改到了这一份 —— 而单聊真正决定成败的是那份同步预检
+		// （这里是异步 goroutine 里跑的，错误返回不到客户端）。合并成一处，杜绝再次漂移。
+		if err := m.singleChatSendAllowed(ctx, data.MsgData.SendID, data.MsgData.RecvID); err != nil {
 			return err
-		}
-		// 检查系统账号权限或消息自由发送权限
-		if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) || u.CanSendFreeMsg == constant.MessageFreeLevel || recv.CanSendFreeMsg == constant.MessageFreeLevel {
-			return nil
-		}
-		// Admin / team-leader org roles bypass friend verification: they may DM anyone
-		// directly, and anyone may reply to them (recv-side role also exempts). OrgRole
-		// values mirror chat svc organization_user.go.
-		if isPrivilegedOrgRole(u.OrgRole) || isPrivilegedOrgRole(recv.OrgRole) {
-			return nil
-		}
-		black, err := m.FriendLocalCache.IsBlack(ctx, data.MsgData.SendID, data.MsgData.RecvID)
-		if err != nil {
-			return err
-		}
-		if black {
-			return servererrs.ErrBlockedByPeer.Wrap()
-		}
-		// 单聊自发自收已在函数开头统一拒绝，此处仅作冗余校验
-		if m.config.RpcConfig.FriendVerify {
-			friend, err := m.FriendLocalCache.IsFriend(ctx, data.MsgData.SendID, data.MsgData.RecvID)
-			if err != nil {
-				return err
-			}
-			if !friend {
-				return servererrs.ErrNotPeersFriend.Wrap()
-			}
-			return nil
 		}
 		return nil
 	case constant.ReadGroupChatType:
@@ -348,4 +324,106 @@ func (m *msgServer) modifyMessageByUserMessageReceiveOpt(ctx context.Context, us
 		return true, nil
 	}
 	return true, nil
+}
+
+// privilegedBypassAllows 判断本次单聊是否可豁免好友校验。
+//
+// 由环境变量 PRIVILEGED_ROLE_FRIEND_BYPASS 控制，取值 none(默认) / sender / both，
+// 语义见调用处注释。默认 none：特权角色也需为好友，符合「解除好友即不能聊天」的预期。
+// singleChatSendAllowed 判断一条单聊消息是否允许发出。
+//
+// 【为什么要单独抽出来】这段逻辑原本在 messageVerification 和
+// preflightSingleChatMsg 里各写了一份。单聊的 messageVerification 是在异步
+// goroutine 里跑的，错误返回不到客户端；真正决定客户端成败的是同步的
+// preflightSingleChatMsg。两份一旦不同步，就会出现「改了校验却毫无效果」
+// —— 修双向好友校验时就正好踩了这个坑。合并成一处。
+func (m *msgServer) singleChatSendAllowed(ctx context.Context, sendID, recvID string) error {
+	u, err := m.UserLocalCache.GetUserInfo(ctx, sendID)
+	if err != nil {
+		return err
+	}
+	recv, err := m.UserLocalCache.GetUserInfo(ctx, recvID)
+	if err != nil {
+		return err
+	}
+	// 系统账号与「消息自由发送」用户不受好友关系限制
+	if authverify.CheckSystemAccount(ctx, u.AppMangerLevel) ||
+		u.CanSendFreeMsg == constant.MessageFreeLevel ||
+		recv.CanSendFreeMsg == constant.MessageFreeLevel {
+		return nil
+	}
+	// 特权组织角色（SuperAdmin / BackendAdmin / GroupManager / TermManager）
+	// 对好友校验的豁免范围，由 PRIVILEGED_ROLE_FRIEND_BYPASS 控制。
+	//
+	// dawn 2026-08-28 客户反馈「解除好友后仍能继续聊天」属 BUG，故默认改为 none。
+	//
+	// 【为什么做成开关】这条判断已经来回调整两次，且三种模式各自会牺牲一些东西：
+	//   both   —— 原行为：收发任一方为特权角色即双方免校验。
+	//             管理员可主动触达，用户也能回复；但解除好友后仍能聊。
+	//   sender —— 仅发送方特权时放行。用户无法主动私聊非好友的管理员，
+	//             也无法回复管理员发来的消息（会话变单向），客服流程会受影响。
+	//   none   —— 默认。特权角色同样需要是好友才能私聊。
+	//             代价：管理员无法主动联系非好友用户。
+	if privilegedBypassAllows(u.OrgRole, recv.OrgRole) {
+		return nil
+	}
+	black, err := m.FriendLocalCache.IsBlack(ctx, sendID, recvID)
+	if err != nil {
+		return err
+	}
+	if black {
+		return servererrs.ErrBlockedByPeer.Wrap()
+	}
+	if !m.config.RpcConfig.FriendVerify {
+		return nil
+	}
+	// 【为什么要求双向好友】客户反馈「业务员添加了好友，解除好友以后，
+	// 还是可以继续聊天」。根因是好友记录有方向，而两处判断对不上：
+	//
+	//   IsFriend(sendID, recvID) 问的是「发送方是否在接收方的好友列表里」，
+	//   而 DeleteFriend 只删发起方一侧的记录（按 owner_user_id 过滤）。
+	//
+	// 于是业务员把用户删掉后，用户列表里还留着业务员，校验依然通过 ——
+	// 谁删的好友，谁反而还能继续发。要求两个方向都成立，
+	// 「解除好友」才对双方同时生效。
+	//
+	// 开关 FRIEND_VERIFY_MUTUAL=off 可退回原来的单边判断。
+	var friend bool
+	if mutualFriendRequired() {
+		friend, err = m.FriendLocalCache.IsMutualFriend(ctx, sendID, recvID)
+	} else {
+		friend, err = m.FriendLocalCache.IsFriend(ctx, sendID, recvID)
+	}
+	if err != nil {
+		return err
+	}
+	if !friend {
+		return servererrs.ErrNotPeersFriend.Wrap()
+	}
+	return nil
+}
+
+// mutualFriendRequired 私聊是否要求双向好友。
+//
+// 默认开启：客户明确要求「解除好友后不能再聊天」，而单边判断做不到这一点。
+// 留开关是因为这会收紧现有行为——若某个部署依赖「对方删了我，我还能发」
+// 的旧语义，可用 FRIEND_VERIFY_MUTUAL=off 退回。
+func mutualFriendRequired() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FRIEND_VERIFY_MUTUAL"))) {
+	case "off", "false", "0":
+		return false
+	default:
+		return true
+	}
+}
+
+func privilegedBypassAllows(senderRole, recvRole string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PRIVILEGED_ROLE_FRIEND_BYPASS"))) {
+	case "both":
+		return isPrivilegedOrgRole(senderRole) || isPrivilegedOrgRole(recvRole)
+	case "sender":
+		return isPrivilegedOrgRole(senderRole)
+	default: // none
+		return false
+	}
 }
